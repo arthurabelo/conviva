@@ -1,0 +1,7 @@
+{
+  "name": "conviva-postgres",
+  "private": true,
+  "dependencies": {
+    "@supabase/server": "^1.3.0"
+  }
+}
