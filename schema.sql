@@ -1,17 +1,4 @@
-DROP TABLE IF EXISTS voto_escolha CASCADE;
-DROP TABLE IF EXISTS voto CASCADE;
-DROP TABLE IF EXISTS opcao_voto CASCADE;
-DROP TABLE IF EXISTS votacao CASCADE;
-DROP TABLE IF EXISTS anexo_votacao CASCADE;
-DROP TABLE IF EXISTS pauta CASCADE;
-DROP TABLE IF EXISTS convidado_reuniao CASCADE;
-DROP TABLE IF EXISTS reuniao CASCADE;
-DROP TABLE IF EXISTS lote CASCADE;
-DROP TABLE IF EXISTS log_auditoria CASCADE;
-DROP TABLE IF EXISTS usuario CASCADE;
-DROP TABLE IF EXISTS condominio CASCADE;
-
-CREATE TABLE condominio (
+CREATE TABLE IF NOT EXISTS condominio (
     id_condominio SERIAL PRIMARY KEY,
     nome TEXT NOT NULL,
     cnpj TEXT NOT NULL UNIQUE,
@@ -19,7 +6,7 @@ CREATE TABLE condominio (
     status TEXT NOT NULL DEFAULT 'ativo'
 );
 
-CREATE TABLE usuario (
+CREATE TABLE IF NOT EXISTS usuario (
     id_usuario SERIAL PRIMARY KEY,
     nome_completo TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
@@ -28,7 +15,7 @@ CREATE TABLE usuario (
     ativo INTEGER NOT NULL DEFAULT 1 CHECK(ativo IN (0,1))
 );
 
-CREATE TABLE lote (
+CREATE TABLE IF NOT EXISTS lote (
     id_lote SERIAL PRIMARY KEY,
     id_condominio INTEGER NOT NULL REFERENCES condominio(id_condominio),
     id_usuario INTEGER NOT NULL REFERENCES usuario(id_usuario),
@@ -38,7 +25,7 @@ CREATE TABLE lote (
     UNIQUE(id_condominio, identificacao)
 );
 
-CREATE TABLE reuniao (
+CREATE TABLE IF NOT EXISTS reuniao (
     id_reuniao SERIAL PRIMARY KEY,
     id_condominio INTEGER NOT NULL REFERENCES condominio(id_condominio),
     titulo TEXT NOT NULL,
@@ -47,7 +34,7 @@ CREATE TABLE reuniao (
     status TEXT NOT NULL CHECK(status IN ('agendada', 'em_andamento', 'encerrada'))
 );
 
-CREATE TABLE convidado_reuniao (
+CREATE TABLE IF NOT EXISTS convidado_reuniao (
     id_convidado SERIAL PRIMARY KEY,
     id_usuario INTEGER NOT NULL REFERENCES usuario(id_usuario),
     id_reuniao INTEGER NOT NULL REFERENCES reuniao(id_reuniao),
@@ -58,14 +45,14 @@ CREATE TABLE convidado_reuniao (
     UNIQUE(id_usuario, id_reuniao)
 );
 
-CREATE TABLE pauta (
+CREATE TABLE IF NOT EXISTS pauta (
     id_pauta SERIAL PRIMARY KEY,
     id_reuniao INTEGER NOT NULL REFERENCES reuniao(id_reuniao),
     assunto TEXT NOT NULL,
     descricao TEXT
 );
 
-CREATE TABLE votacao (
+CREATE TABLE IF NOT EXISTS votacao (
     id_votacao SERIAL PRIMARY KEY,
     id_pauta INTEGER NOT NULL REFERENCES pauta(id_pauta),
     assunto TEXT NOT NULL,
@@ -80,14 +67,14 @@ CREATE TABLE votacao (
     encerrada_em TIMESTAMP
 );
 
-CREATE TABLE opcao_voto (
+CREATE TABLE IF NOT EXISTS opcao_voto (
     id_opcao SERIAL PRIMARY KEY,
     id_votacao INTEGER NOT NULL REFERENCES votacao(id_votacao),
     descricao TEXT NOT NULL,
     ordem INTEGER NOT NULL
 );
 
-CREATE TABLE voto (
+CREATE TABLE IF NOT EXISTS voto (
     id_voto SERIAL PRIMARY KEY,
     id_usuario INTEGER NOT NULL REFERENCES usuario(id_usuario),
     id_votacao INTEGER NOT NULL REFERENCES votacao(id_votacao),
@@ -98,14 +85,14 @@ CREATE TABLE voto (
     UNIQUE(id_usuario, id_votacao)
 );
 
-CREATE TABLE voto_escolha (
+CREATE TABLE IF NOT EXISTS voto_escolha (
     id_voto_escolha SERIAL PRIMARY KEY,
     id_voto INTEGER NOT NULL REFERENCES voto(id_voto),
     id_opcao INTEGER NOT NULL REFERENCES opcao_voto(id_opcao),
     UNIQUE(id_voto, id_opcao)
 );
 
-CREATE TABLE log_auditoria (
+CREATE TABLE IF NOT EXISTS log_auditoria (
     id_log SERIAL PRIMARY KEY,
     id_usuario INTEGER REFERENCES usuario(id_usuario),
     acao TEXT NOT NULL,

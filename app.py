@@ -1,13 +1,26 @@
 import io
 import os
+import sys
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-from conviva_votacao import controllers
+from conviva_votacao import controllers, models
+from seed import main as seed_main
 
 HOST = "0.0.0.0"
 PORT = int(os.getenv("PORT", "8000"))
+
+
+def bootstrap_database() -> None:
+    try:
+        seed_main()
+    except Exception as exc:
+        print(f"Bootstrap de banco falhou: {exc}")
+
+
+if os.getenv("VERCEL") == "1" or "gunicorn" in sys.modules:
+    bootstrap_database()
 
 
 class ConvivaHandler(BaseHTTPRequestHandler):
