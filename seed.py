@@ -1,8 +1,29 @@
+import time
+
 from conviva_votacao import models
 from conviva_votacao.security import hash_password
 
 
+def wait_for_db(retries: int = 30, delay: int = 2) -> None:
+    for attempt in range(1, retries + 1):
+        try:
+            with models.get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+            return
+        except Exception as exc:
+            if attempt == retries:
+                raise RuntimeError("Não foi possível conectar ao banco de dados") from exc
+            print(f"Aguardando banco de dados ({attempt}/{retries})...")
+            time.sleep(delay)
+
+
 def main() -> None:
+    wait_for_db()
+    if models.query_one("SELECT 1 FROM usuario WHERE email = ?", ("admin@conviva.com",)):
+        print("Dados iniciais já existem. Pulando seed.")
+        return
+
     models.init_db()
     senha = hash_password("senha123")
 
@@ -51,7 +72,7 @@ def main() -> None:
             "INSERT INTO convidado_reuniao (id_usuario, id_reuniao, status_convite, status_presenca, data_hora_entrada) VALUES (?, ?, 'confirmado', 1, datetime('now'))",
             [user_id, id_reuniao],
         )
-    print("Banco conviva.sqlite3 criado com dados iniciais.")
+    print("Banco criado com dados iniciais.")
 
 
 if __name__ == "__main__":

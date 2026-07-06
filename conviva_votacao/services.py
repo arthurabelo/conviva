@@ -122,20 +122,21 @@ def encerrar_votacao(id_votacao: int, user: dict[str, Any], ip: str, navegador: 
     audit(user, "encerrou votação", f"votacao:{id_votacao}", ip, navegador)
 
 
-def auto_encerrar_se_expirada(id_votacao):
-    votacao = repositories.buscar_votacao(id_votacao)
+def auto_encerrar_se_expirada(id_votacao: int) -> None:
+    votacao = get_votacao(id_votacao)
 
-    if not votacao or votacao["status"] != "ABERTA":
+    if not votacao or votacao["status"] != "ativa":
         return
 
-    encerra_em = votacao["encerra_em"]
-
+    encerra_em = votacao.get("encerra_em")
     if isinstance(encerra_em, str):
-        encerra_em = datetime.strptime(encerra_em, DATE_FMT)
+        try:
+            encerra_em = datetime.strptime(encerra_em, DATE_FMT)
+        except ValueError:
+            return
 
-    if datetime.now() >= encerra_em:
-        repositories.atualizar_status_votacao(id_votacao, "ENCERRADA")
-        
+    if encerra_em and datetime.now() >= encerra_em:
+        models.execute("UPDATE votacao SET status = 'encerrada', encerrada_em = ? WHERE id_votacao = ?", [now_str(), id_votacao])
 
 def usuario_presente_na_reuniao(id_usuario: int, id_reuniao: int) -> bool:
     row = models.query_one(

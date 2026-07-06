@@ -36,7 +36,35 @@ http://localhost:8000
 
 O container da aplicação executa `python seed.py` antes de iniciar o servidor. Isso recria as tabelas e popula dados de teste.
 
-## 🐳 Troubleshooting: Docker Engine Stuck "Starting" (Windows/WSL)
+## Deploy no Vercel
+
+Para publicar no Vercel automaticamente após cada push na branch `main`, configure o projeto do Vercel e adicione os seguintes segredos no GitHub:
+
+- `VERCEL_TOKEN`
+- `VERCEL_ORG_ID`
+- `VERCEL_PROJECT_ID`
+
+O repositório usa estes arquivos:
+- `vercel.json` para informar o build do Python e rotear todas as requisições para `app.py`.
+- `.github/workflows/vercel-deploy.yml` para disparar deploy automático ao fazer push.
+
+No Vercel, defina também a variável de ambiente `DATABASE_URL` com a URL do banco PostgreSQL acessível pelo deploy.
+
+##  Troubleshooting: Docker Engine Stuck "Starting" (Windows/WSL)
+
+Para publicar no Vercel automaticamente após cada push na branch `main`, configure o projeto do Vercel e adicione os seguintes segredos no GitHub:
+
+- `VERCEL_TOKEN`
+- `VERCEL_ORG_ID`
+- `VERCEL_PROJECT_ID`
+
+O repositório usa estes arquivos:
+- `vercel.json` para informar o build do Python e rotear todas as requisições para `app.py`.
+- `.github/workflows/vercel-deploy.yml` para disparar deploy automático ao fazer push.
+
+No Vercel, defina também a variável de ambiente `DATABASE_URL` com a URL do banco PostgreSQL acessível pelo deploy.
+
+##  Troubleshooting: Docker Engine Stuck "Starting" (Windows/WSL)
 
 Se o Docker Desktop travar infinitamente na tela de inicialização, o subsistema WSL pode estar corrompido. Siga os passos abaixo no **PowerShell como Administrador** para resetar o ambiente:
 
@@ -50,6 +78,7 @@ Se o Docker Desktop travar infinitamente na tela de inicialização, o subsistem
 2. **Atualize o WSL:**
    ```powershell
    wsl --update
+
    ```
 
 3. **Limpe os caches locais (opcional):**
@@ -82,4 +111,4 @@ Se o Docker Desktop travar infinitamente na tela de inicialização, o subsistem
 
 ## Observação
 
-Para apresentação acadêmica, o `seed.py` reinicia o banco a cada subida da aplicação. Para uso real, esse comportamento deveria ser substituído por migrações controladas.
+O `seed.py` reinicia o banco a cada subida da aplicação.

@@ -3,13 +3,14 @@ import hashlib
 import hmac
 import os
 import secrets
+import time
 from http import cookies
 from typing import Any
 
 from . import models
 
-_sessions: dict[str, int] = {}
-_user_tokens: dict[int, str] = {}
+SECRET_KEY = os.getenv("SECRET_KEY", "conviva-dev-secret")
+SESSION_EXPIRE_SECONDS = int(os.getenv("SESSION_EXPIRE_SECONDS", "86400"))
 
 
 def hash_password(password: str, salt: bytes | None = None) -> str:
@@ -29,6 +30,33 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
+def _sign(payload: bytes) -> bytes:
+    return hmac.new(SECRET_KEY.encode("utf-8"), payload, hashlib.sha256).digest()
+
+
+def _build_token(user_id: int) -> str:
+    expires = int(time.time()) + SESSION_EXPIRE_SECONDS
+    payload = f"{user_id}:{expires}".encode("utf-8")
+    signature = _sign(payload)
+    token = base64.urlsafe_b64encode(payload + b"." + signature)
+    return token.decode("utf-8")
+
+
+def _parse_token(token: str) -> int | None:
+    try:
+        decoded = base64.urlsafe_b64decode(token.encode("utf-8"))
+        payload, signature = decoded.rsplit(b".", 1)
+        if not hmac.compare_digest(signature, _sign(payload)):
+            return None
+        payload_text = payload.decode("utf-8")
+        user_id_str, expires_str = payload_text.split(":", 1)
+        if int(expires_str) < int(time.time()):
+            return None
+        return int(user_id_str)
+    except Exception:
+        return None
+
+
 def authenticate(email: str, password: str) -> dict[str, Any] | None:
     user = models.query_one("SELECT * FROM usuario WHERE email = ? AND ativo = 1", [email.strip().lower()])
     if user and verify_password(password, user["senha_hash"]):
@@ -36,25 +64,12 @@ def authenticate(email: str, password: str) -> dict[str, Any] | None:
     return None
 
 
-def has_active_session(user_id: int) -> bool:
-    token = _user_tokens.get(user_id)
-    return bool(token and token in _sessions)
-
-
 def create_session(user_id: int) -> str:
-    if has_active_session(user_id):
-        raise RuntimeError("Já existe uma sessão ativa para este usuário. Saia da sessão anterior antes de entrar novamente.")
-    token = secrets.token_urlsafe(32)
-    _sessions[token] = user_id
-    _user_tokens[user_id] = token
-    return token
+    return _build_token(user_id)
 
 
 def delete_session(token: str | None) -> None:
-    if token:
-        user_id = _sessions.pop(token, None)
-        if user_id is not None and _user_tokens.get(user_id) == token:
-            _user_tokens.pop(user_id, None)
+    return None
 
 
 def parse_cookie(header: str | None) -> dict[str, str]:
@@ -66,7 +81,9 @@ def parse_cookie(header: str | None) -> dict[str, str]:
 
 def get_current_user(cookie_header: str | None) -> dict[str, Any] | None:
     token = parse_cookie(cookie_header).get("conviva_session")
-    user_id = _sessions.get(token or "")
+    if not token:
+        return None
+    user_id = _parse_token(token)
     if not user_id:
         return None
     user = models.query_one("SELECT * FROM usuario WHERE id_usuario = ? AND ativo = 1", [user_id])

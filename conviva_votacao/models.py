@@ -25,10 +25,13 @@ PK_MAP = {
 
 
 def _database_url() -> str:
-    return os.getenv(
+    url = os.getenv(
         "DATABASE_URL",
         "postgresql://conviva:conviva@localhost:5432/conviva_db",
     )
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql://", 1)
+    return url
 
 
 def get_conn():
