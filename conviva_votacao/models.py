@@ -30,7 +30,8 @@ def _database_url() -> str:
     # 2) STORAGE_POSTGRES_URL (Vercel Storage/Postgres)
     # 3) STORAGE_POSTGRES_PRISMA_URL (fallback comum no painel)
     url = (
-        os.getenv("DATABASE_URL")
+        os.getenv("POSTGRES_URL")
+        or os.getenv("DATABASE_URL")
         or os.getenv("STORAGE_POSTGRES_URL")
         or os.getenv("STORAGE_POSTGRES_PRISMA_URL")
     )
