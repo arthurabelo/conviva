@@ -25,12 +25,23 @@ PK_MAP = {
 
 
 def _database_url() -> str:
-    url = os.getenv(
-        "DATABASE_URL",
-        "postgresql://conviva:conviva@localhost:5432/conviva_db",
+    # Ordem de prioridade:
+    # 1) DATABASE_URL (padrão de apps Python)
+    # 2) STORAGE_POSTGRES_URL (Vercel Storage/Postgres)
+    # 3) STORAGE_POSTGRES_PRISMA_URL (fallback comum no painel)
+    url = (
+        os.getenv("DATABASE_URL")
+        or os.getenv("STORAGE_POSTGRES_URL")
+        or os.getenv("STORAGE_POSTGRES_PRISMA_URL")
     )
+
+    # Fallback só para ambiente local
+    if not url:
+        url = "postgresql://conviva:conviva@localhost:5432/conviva_db"
+
     if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql://", 1)
+        url = url.replace("postgres://", "postgresql://", 1)
+
     return url
 
 
