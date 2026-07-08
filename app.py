@@ -160,6 +160,7 @@ application = app
 
 
 if __name__ == "__main__":
+    bootstrap_database()
     server = ThreadingHTTPServer((HOST, PORT), ConvivaHandler)
     print(f"CONVIVA rodando em http://{HOST}:{PORT}")
     print("Use Ctrl+C para parar.")

@@ -2,14 +2,13 @@ import time
 
 from conviva_votacao import models
 from conviva_votacao.security import hash_password
+from conviva_votacao.services import now_str
 
 
 def wait_for_db(retries: int = 30, delay: int = 2) -> None:
     for attempt in range(1, retries + 1):
         try:
-            with models.get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
+            models.ping()
             return
         except Exception as exc:
             if attempt == retries:
@@ -20,11 +19,12 @@ def wait_for_db(retries: int = 30, delay: int = 2) -> None:
 
 def main() -> None:
     wait_for_db()
+    models.init_db()
+    models.execute("UPDATE sessao_usuario SET encerrada_em = ? WHERE encerrada_em IS NULL", [now_str()])
     if models.query_one("SELECT 1 FROM usuario WHERE email = ?", ("admin@conviva.com",)):
         print("Dados iniciais já existem. Pulando seed.")
         return
 
-    models.init_db()
     senha = hash_password("senha123")
 
     id_cond = models.execute(

@@ -15,6 +15,20 @@ CREATE TABLE IF NOT EXISTS usuario (
     ativo INTEGER NOT NULL DEFAULT 1 CHECK(ativo IN (0,1))
 );
 
+CREATE TABLE IF NOT EXISTS sessao_usuario (
+    id_sessao SERIAL PRIMARY KEY,
+    id_usuario INTEGER NOT NULL REFERENCES usuario(id_usuario),
+    token_hash TEXT NOT NULL UNIQUE,
+    criada_em TIMESTAMP NOT NULL,
+    expira_em TIMESTAMP NOT NULL,
+    encerrada_em TIMESTAMP,
+    ip TEXT,
+    navegador TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessao_usuario_ativa
+    ON sessao_usuario(id_usuario, encerrada_em, expira_em);
+
 CREATE TABLE IF NOT EXISTS lote (
     id_lote SERIAL PRIMARY KEY,
     id_condominio INTEGER NOT NULL REFERENCES condominio(id_condominio),
@@ -58,9 +72,9 @@ CREATE TABLE IF NOT EXISTS votacao (
     assunto TEXT NOT NULL,
     pergunta TEXT NOT NULL,
     tipo_votacao TEXT NOT NULL CHECK(tipo_votacao IN ('aberta', 'fechada')),
-    tipo_resposta TEXT NOT NULL DEFAULT 'escolha_unica',
+    tipo_resposta TEXT NOT NULL DEFAULT 'escolha_unica' CHECK(tipo_resposta IN ('escolha_unica', 'multipla_escolha', 'eleicao')),
     tempo_resposta INTEGER NOT NULL CHECK(tempo_resposta > 0),
-    max_marcacoes INTEGER NOT NULL DEFAULT 1,
+    max_marcacoes INTEGER NOT NULL DEFAULT 1 CHECK(max_marcacoes > 0),
     status TEXT NOT NULL CHECK(status IN ('agendada', 'ativa', 'encerrada', 'invalidada')) DEFAULT 'agendada',
     iniciou_em TIMESTAMP,
     encerra_em TIMESTAMP,

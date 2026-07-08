@@ -1,31 +1,40 @@
-# CONVIVA - Módulo de Votação com Docker e PostgreSQL
+# CONVIVA - Módulo de Votação
 
-Protótipo acadêmico do módulo de votação do CONVIVA, baseado no `CONVIVA_ERSW_9_0.docx`.
+Protótipo acadêmico do módulo de votação do CONVIVA, baseado no documento `CONVIVA_ERSW_9_0.pdf`.
 
-Funcionalidades implementadas:
+## Funcionalidades
 
 - Entrar no sistema por e-mail e senha.
-- Criar votação.
-- Iniciar, executar e encerrar votação.
-- Registrar voto único por usuário presente.
+- Bloquear sessão simultânea da mesma conta.
+- Criar votação vinculada a uma reunião e pauta.
+- Configurar votação aberta ou fechada.
+- Configurar tipo de resposta: escolha única, múltipla escolha ou eleição de nomes.
+- Iniciar e encerrar votação durante a reunião.
+- Registrar voto apenas de participante presente.
 - Calcular resultado por peso de voto.
-- Exibir resultado aberto/fechado.
+- Ocultar resultado até o encerramento.
+- Exibir relatório nominal apenas em votação aberta.
 - Registrar logs de auditoria.
 
 ## Arquitetura
 
-A implementação usa um monólito modular MVC Web em três camadas, executado por Docker Compose:
+A implementação usa MVC Web em Python, organizada como monólito modular:
 
-- `app-conviva`: aplicação Web Python.
-- `db-postgres`: banco PostgreSQL 16.
-- `pgdata`: volume Docker para persistência do banco.
+- `app.py`: entrada HTTP/WSGI e roteamento.
+- `conviva_votacao/controllers.py`: controle das requisições.
+- `conviva_votacao/services.py`: regras de negócio.
+- `conviva_votacao/models.py`: acesso ao banco de dados.
+- `conviva_votacao/templates.py`: HTML das telas.
+- `conviva_votacao/security.py`: autenticação, senha e sessão.
+- `schema.sql`: modelo relacional.
+- `seed.py`: carga inicial para demonstração.
 
-## Como executar
+O banco padrão local é SQLite, por ser suficiente para a apresentação e não exigir Docker. PostgreSQL continua disponível quando `DATABASE_URL` estiver configurado.
 
-Na pasta do projeto:
+## Como executar localmente
 
 ```bash
-docker compose up --build
+python app.py
 ```
 
 Acesse:
@@ -34,57 +43,15 @@ Acesse:
 http://localhost:8000
 ```
 
-O container da aplicação executa `python seed.py` antes de iniciar o servidor. Isso recria as tabelas e popula dados de teste.
+O arquivo `app.py` prepara o banco local e insere dados de demonstração automaticamente.
 
-## Deploy no Vercel
+## Executar com PostgreSQL e Docker
 
-Para publicar no Vercel automaticamente após cada push na branch `main`, configure o projeto do Vercel e adicione os seguintes segredos no GitHub:
+```bash
+docker compose up --build
+```
 
-- `VERCEL_TOKEN`
-- `VERCEL_ORG_ID`
-- `VERCEL_PROJECT_ID`
-
-O repositório usa estes arquivos:
-- `vercel.json` para informar o build do Python e rotear todas as requisições para `app.py`.
-- `.github/workflows/vercel-deploy.yml` para disparar deploy automático ao fazer push.
-
-No Vercel, defina também a variável de ambiente `DATABASE_URL` com a URL do banco PostgreSQL acessível pelo deploy.
-
-##  Troubleshooting: Docker Engine Stuck "Starting" (Windows/WSL)
-
-Para publicar no Vercel automaticamente após cada push na branch `main`, configure o projeto do Vercel e adicione os seguintes segredos no GitHub:
-
-- `VERCEL_TOKEN`
-- `VERCEL_ORG_ID`
-- `VERCEL_PROJECT_ID`
-
-O repositório usa estes arquivos:
-- `vercel.json` para informar o build do Python e rotear todas as requisições para `app.py`.
-- `.github/workflows/vercel-deploy.yml` para disparar deploy automático ao fazer push.
-
-No Vercel, defina também a variável de ambiente `DATABASE_URL` com a URL do banco PostgreSQL acessível pelo deploy.
-
-##  Troubleshooting: Docker Engine Stuck "Starting" (Windows/WSL)
-
-Se o Docker Desktop travar infinitamente na tela de inicialização, o subsistema WSL pode estar corrompido. Siga os passos abaixo no **PowerShell como Administrador** para resetar o ambiente:
-
-1. **Derrube o WSL e limpe as distros do Docker:**
-   ```powershell
-   wsl --shutdown
-   wsl --unregister docker-desktop
-   ```
-   *(Nota: Se o comando para `docker-desktop-data` der erro de "distribuição não encontrada", ignore. Versões recentes concentram tudo na principal).*
-
-2. **Atualize o WSL:**
-   ```powershell
-   wsl --update
-
-   ```
-
-3. **Limpe os caches locais (opcional):**
-   Exclua as pastas `Docker` em `%AppData%` e `%LocalAppData%` caso o erro persista.
-
-4. **Reinicie o Docker Desktop** para que ele recrie o ambiente do zero.
+O `docker-compose.yml` configura PostgreSQL 16 e passa a `DATABASE_URL` para a aplicação.
 
 ## Usuários de teste
 
@@ -94,21 +61,17 @@ Se o Docker Desktop travar infinitamente na tela de inicialização, o subsistem
 | Proprietário | diego@email.com | senha123 |
 | Proprietário | gabriel@email.com | senha123 |
 
-## Roteiro de demonstração
+## Roteiro rápido
 
 1. Entrar como `admin@conviva.com`.
 2. Abrir **Votações**.
-3. Criar uma votação nova.
+3. Criar uma votação pré-configurada.
 4. Iniciar a votação.
 5. Sair e entrar como `diego@email.com`.
-6. Registrar um voto.
+6. Registrar voto.
 7. Sair e entrar como `gabriel@email.com`.
 8. Registrar outro voto.
 9. Voltar como administrador.
 10. Encerrar a votação.
 11. Abrir o resultado.
 12. Conferir a auditoria.
-
-## Observação
-
-O `seed.py` reinicia o banco a cada subida da aplicação.

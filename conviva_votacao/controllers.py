@@ -58,7 +58,7 @@ def post_login(handler: Any, raw: bytes) -> Response:
     if not user:
         return Response(templates.login("E-mail ou senha inválidos."), 401)
     try:
-        token = security.create_session(user["id_usuario"])
+        token = security.create_session(user["id_usuario"], client_ip(handler), user_agent(handler))
     except RuntimeError as exc:
         return Response(templates.login(str(exc)), 409)
     services.audit(user, "entrou no sistema", "sessao", client_ip(handler), user_agent(handler))
@@ -149,7 +149,7 @@ def votar_post(handler: Any, id_votacao: int, raw: bytes) -> Response:
         return user
     form = parse_form(raw)
     try:
-        services.registrar_voto(id_votacao, int(form.get("id_opcao") or 0), user, client_ip(handler), user_agent(handler))
+        services.registrar_voto(id_votacao, form.get("id_opcao") or [], user, client_ip(handler), user_agent(handler))
         return votar_form(handler, id_votacao, message="Voto confirmado com sucesso.")
     except Exception as exc:
         return votar_form(handler, id_votacao, error=str(exc))
@@ -160,7 +160,7 @@ def resultado(handler: Any, id_votacao: int) -> Response:
     if isinstance(user, Response):
         return user
     result = services.resultado_votacao(id_votacao)
-    if result["votacao"]["status"] == "ativa" and not security.is_admin(user):
+    if result["votacao"]["status"] not in {"encerrada", "invalidada"}:
         return Response(templates.resultado(user, result, "O resultado só fica disponível após o encerramento da votação."))
     services.audit(user, "visualizou resultado", f"votacao:{id_votacao}", client_ip(handler), user_agent(handler))
     return Response(templates.resultado(user, result))
