@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -106,18 +107,23 @@ def insert_returning_sql(sql: str) -> str:
 class Database:
     def __init__(self, url: str | None = DATABASE_URL):
         self.url = url
+        self._local = threading.local()
 
     def connect(self) -> psycopg.Connection:
         if not self.url:
             raise RuntimeError(
                 "Configure DATABASE_URL ou STORAGE_POSTGRES_URL com a URL Postgres do Supabase."
             )
-        return psycopg.connect(self.url, row_factory=dict_row)
+        conn = getattr(self._local, "conn", None)
+        if conn is None or conn.closed:
+            conn = psycopg.connect(self.url, row_factory=dict_row)
+            self._local.conn = conn
+        return conn
 
     def init_db(self) -> None:
-        with self.connect() as conn:
-            conn.execute(SCHEMA_PATH.read_text(encoding="utf-8"))
-            conn.commit()
+        conn = self.connect()
+        conn.execute(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.commit()
 
     def reset_db(self) -> None:
         drops = [
@@ -136,33 +142,33 @@ class Database:
             "usuario",
             "condominio",
         ]
-        with self.connect() as conn:
-            for table in drops:
-                conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
-            conn.commit()
+        conn = self.connect()
+        for table in drops:
+            conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+        conn.commit()
         self.init_db()
 
     def query(self, sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
-        with self.connect() as conn:
-            rows = conn.execute(prepare_sql(sql), tuple(params)).fetchall()
-            return [dict(row) for row in rows]
+        conn = self.connect()
+        rows = conn.execute(prepare_sql(sql), tuple(params)).fetchall()
+        return [dict(row) for row in rows]
 
     def query_one(self, sql: str, params: Iterable[Any] = ()) -> dict[str, Any] | None:
-        with self.connect() as conn:
-            row = conn.execute(prepare_sql(sql), tuple(params)).fetchone()
-            return dict(row) if row else None
+        conn = self.connect()
+        row = conn.execute(prepare_sql(sql), tuple(params)).fetchone()
+        return dict(row) if row else None
 
     def execute(self, sql: str, params: Iterable[Any] = ()) -> int:
-        with self.connect() as conn:
-            cursor = conn.execute(insert_returning_sql(prepare_sql(sql)), tuple(params))
-            row = cursor.fetchone() if cursor.description else None
-            conn.commit()
-            return int(next(iter(row.values())) if row else 0)
+        conn = self.connect()
+        cursor = conn.execute(insert_returning_sql(prepare_sql(sql)), tuple(params))
+        row = cursor.fetchone() if cursor.description else None
+        conn.commit()
+        return int(next(iter(row.values())) if row else 0)
 
     def execute_many(self, sql: str, seq_of_params: Iterable[Iterable[Any]]) -> None:
-        with self.connect() as conn:
-            conn.executemany(prepare_sql(sql), [tuple(params) for params in seq_of_params])
-            conn.commit()
+        conn = self.connect()
+        conn.executemany(prepare_sql(sql), [tuple(params) for params in seq_of_params])
+        conn.commit()
 
 
 class UsuarioRepository:
