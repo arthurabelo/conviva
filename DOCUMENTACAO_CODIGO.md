@@ -97,7 +97,7 @@ Converte o cabecalho HTTP `Cookie` em um dicionario simples, permitindo recupera
 
 ## `conviva/models.py`
 
-Arquivo da camada Model/Repository. Contem entidades simples, conexao com PostgreSQL/Supabase e repositorios responsaveis por consultas e comandos SQL.
+Arquivo da camada Model/Repository. Contém entidades simples, conexão com PostgreSQL/Supabase e repositórios responsáveis por consultas e comandos SQL.
 
 ### Constantes
 
