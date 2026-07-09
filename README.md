@@ -22,11 +22,11 @@ O projeto segue MVC Web e usa PostgreSQL, com suporte a conexão pelo Supabase.
 
 ```text
 app.py                         servidor HTTP e roteamento inicial
-conviva/controllers.py          controladores MVC e endpoints JSON
-conviva/services.py             regras de negocio e casos de uso
-conviva/models.py               entidades, banco de dados e repositorios
-conviva/templates.py            views HTML
-conviva/security.py             hash de senha, token e cookies
+src/controllers.py          controladores MVC e endpoints JSON
+src/services.py             regras de negocio e casos de uso
+src/models.py               entidades, banco de dados e repositorios
+src/templates.py            views HTML
+src/security.py             hash de senha, token e cookies
 static/                         CSS e JavaScript da tela de reuniao
 schema.sql                      schema PostgreSQL
 seed.py                         massa de dados para demonstracao
