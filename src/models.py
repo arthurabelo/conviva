@@ -1,15 +1,34 @@
 from __future__ import annotations
 
 import os
-import sqlite3
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+import psycopg
+from psycopg.rows import dict_row
+
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-DB_PATH = Path(os.getenv("CONVIVA_DB_PATH", "/tmp/conviva.sqlite3" if os.getenv("VERCEL") == "1" else str(DATA_DIR / "conviva.sqlite3")))
 SCHEMA_PATH = BASE_DIR / "schema.sql"
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("STORAGE_POSTGRES_URL") or os.getenv("STORAGE_POSTGRES_PRISMA_URL") or os.getenv("STORAGE_POSTGRES_URL_NON_POOLING")
+
+INSERT_PRIMARY_KEYS = {
+    "condominio": "id_condominio",
+    "usuario": "id_usuario",
+    "sessao_usuario": "id_sessao",
+    "lote": "id_lote",
+    "reuniao": "id_reuniao",
+    "convidado_reuniao": "id_convidado",
+    "pauta": "id_pauta",
+    "anexo_pauta": "id_anexo",
+    "procuracao": "id_procuracao",
+    "votacao": "id_votacao",
+    "opcao_voto": "id_opcao",
+    "voto": "id_voto",
+    "voto_escolha": "id_voto_escolha",
+    "log_auditoria": "id_log",
+}
 
 
 @dataclass(frozen=True)
@@ -68,20 +87,36 @@ class Votacao:
         )
 
 
-class Database:
-    def __init__(self, path: Path = DB_PATH):
-        self.path = Path(path)
+def prepare_sql(sql: str) -> str:
+    return sql.replace("?", "%s")
 
-    def connect(self) -> sqlite3.Connection:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+
+def insert_returning_sql(sql: str) -> str:
+    if re.search(r"\bRETURNING\b", sql, re.IGNORECASE):
+        return sql
+    match = re.match(r"\s*INSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)", sql, re.IGNORECASE)
+    if not match:
+        return sql
+    primary_key = INSERT_PRIMARY_KEYS.get(match.group(1).lower())
+    if not primary_key:
+        return sql
+    return f"{sql.rstrip().rstrip(';')} RETURNING {primary_key}"
+
+
+class Database:
+    def __init__(self, url: str | None = DATABASE_URL):
+        self.url = url
+
+    def connect(self) -> psycopg.Connection:
+        if not self.url:
+            raise RuntimeError(
+                "Configure DATABASE_URL ou STORAGE_POSTGRES_URL com a URL Postgres do Supabase."
+            )
+        return psycopg.connect(self.url, row_factory=dict_row)
 
     def init_db(self) -> None:
         with self.connect() as conn:
-            conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            conn.execute(SCHEMA_PATH.read_text(encoding="utf-8"))
             conn.commit()
 
     def reset_db(self) -> None:
@@ -102,31 +137,31 @@ class Database:
             "condominio",
         ]
         with self.connect() as conn:
-            conn.execute("PRAGMA foreign_keys = OFF")
             for table in drops:
-                conn.execute(f"DROP TABLE IF EXISTS {table}")
+                conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
             conn.commit()
         self.init_db()
 
     def query(self, sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            rows = conn.execute(sql, tuple(params)).fetchall()
+            rows = conn.execute(prepare_sql(sql), tuple(params)).fetchall()
             return [dict(row) for row in rows]
 
     def query_one(self, sql: str, params: Iterable[Any] = ()) -> dict[str, Any] | None:
         with self.connect() as conn:
-            row = conn.execute(sql, tuple(params)).fetchone()
+            row = conn.execute(prepare_sql(sql), tuple(params)).fetchone()
             return dict(row) if row else None
 
     def execute(self, sql: str, params: Iterable[Any] = ()) -> int:
         with self.connect() as conn:
-            cursor = conn.execute(sql, tuple(params))
+            cursor = conn.execute(insert_returning_sql(prepare_sql(sql)), tuple(params))
+            row = cursor.fetchone() if cursor.description else None
             conn.commit()
-            return int(cursor.lastrowid or 0)
+            return int(next(iter(row.values())) if row else 0)
 
     def execute_many(self, sql: str, seq_of_params: Iterable[Iterable[Any]]) -> None:
         with self.connect() as conn:
-            conn.executemany(sql, [tuple(params) for params in seq_of_params])
+            conn.executemany(prepare_sql(sql), [tuple(params) for params in seq_of_params])
             conn.commit()
 
 
@@ -368,7 +403,7 @@ class VotacaoRepository:
     def update(self, id_votacao: int, data: dict[str, Any], opcoes: list[str]) -> None:
         with self.db.connect() as conn:
             conn.execute(
-                """
+                prepare_sql("""
                 UPDATE votacao
                 SET id_pauta = ?,
                     assunto = ?,
@@ -378,7 +413,7 @@ class VotacaoRepository:
                     tempo_resposta = ?,
                     max_marcacoes = ?
                 WHERE id_votacao = ?
-                """,
+                """),
                 [
                     data["id_pauta"],
                     data["assunto"],
@@ -390,9 +425,9 @@ class VotacaoRepository:
                     id_votacao,
                 ],
             )
-            conn.execute("DELETE FROM opcao_voto WHERE id_votacao = ?", [id_votacao])
+            conn.execute(prepare_sql("DELETE FROM opcao_voto WHERE id_votacao = ?"), [id_votacao])
             conn.executemany(
-                "INSERT INTO opcao_voto (id_votacao, descricao, ordem) VALUES (?, ?, ?)",
+                prepare_sql("INSERT INTO opcao_voto (id_votacao, descricao, ordem) VALUES (?, ?, ?)"),
                 [(id_votacao, descricao, ordem) for ordem, descricao in enumerate(opcoes, start=1)],
             )
             conn.commit()
@@ -554,8 +589,8 @@ class VotacaoRepository:
             SELECT v.id_voto,
                    u.nome_completo AS responsavel_nome,
                    rep.nome_completo AS representado_nome,
-                   GROUP_CONCAT(DISTINCT l.identificacao) AS imoveis,
-                   GROUP_CONCAT(DISTINCT o.descricao) AS voto,
+                   STRING_AGG(DISTINCT l.identificacao, ', ') AS imoveis,
+                   STRING_AGG(DISTINCT o.descricao, ', ') AS voto,
                    v.peso_aplicado,
                    v.data_hora_voto
             FROM voto v

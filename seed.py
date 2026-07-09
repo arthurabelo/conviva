@@ -80,7 +80,7 @@ def main() -> None:
         """
         INSERT INTO reuniao
             (id_condominio, titulo, data, hora, assunto, url_video, status, iniciou_em)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         """,
         [
             id_condominio,
@@ -162,7 +162,7 @@ def main() -> None:
             [id_votacao, "Nao sei / nao quero responder", 3],
         ],
     )
-    print("Banco criado em data/conviva.sqlite3")
+    print("Banco PostgreSQL inicializado com dados de demonstracao")
     print("Usuarios de teste: admin@conviva.com, diego@email.com, gabriel@email.com, marina@email.com")
     print("Senha para todos: senha123")
 

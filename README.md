@@ -1,7 +1,7 @@
 # CONVIVA - Modulo de Votacao
 
 Implementacao web em Python puro para o recorte de votacao do sistema CONVIVA.
-O projeto segue MVC Web, usa SQLite e nao depende de bibliotecas externas.
+O projeto segue MVC Web e usa PostgreSQL, com suporte a conexao pelo Supabase.
 
 ## Funcionalidades
 
@@ -28,16 +28,26 @@ conviva/models.py               entidades, banco de dados e repositorios
 conviva/templates.py            views HTML
 conviva/security.py             hash de senha, token e cookies
 static/                         CSS e JavaScript da tela de reuniao
-schema.sql                      schema SQLite
+schema.sql                      schema PostgreSQL
 seed.py                         massa de dados para demonstracao
 ```
 
 ## Como executar
 
-Requisito: Python 3.10 ou superior.
+Requisitos: Python 3.10 ou superior e um banco PostgreSQL/Supabase.
+
+Configure uma das variaveis abaixo com a URL Postgres do Supabase:
 
 ```bash
-cd implementacao_codex
+export STORAGE_POSTGRES_URL="postgres://..."
+# ou
+export DATABASE_URL="postgres://..."
+```
+
+Instale as dependencias e inicialize os dados de demonstracao:
+
+```bash
+pip install -r requirements.txt
 python seed.py
 python app.py
 ```
