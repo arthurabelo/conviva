@@ -156,7 +156,7 @@ Define a URL PostgreSQL/Supabase usada pela instância.
 
 #### Metodo `connect(self) -> psycopg.Connection`
 
-Abre conexao PostgreSQL usando `psycopg` e configura retorno de linhas como dicionarios.
+Abre conexão PostgreSQL usando `psycopg` e configura retorno de linhas como dicionários.
 
 #### Metodo `init_db(self) -> None`
 
