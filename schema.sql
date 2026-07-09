@@ -1,5 +1,7 @@
+PRAGMA foreign_keys = ON;
+
 CREATE TABLE IF NOT EXISTS condominio (
-    id_condominio SERIAL PRIMARY KEY,
+    id_condominio INTEGER PRIMARY KEY AUTOINCREMENT,
     nome TEXT NOT NULL,
     cnpj TEXT NOT NULL UNIQUE,
     endereco TEXT NOT NULL,
@@ -7,97 +9,156 @@ CREATE TABLE IF NOT EXISTS condominio (
 );
 
 CREATE TABLE IF NOT EXISTS usuario (
-    id_usuario SERIAL PRIMARY KEY,
+    id_usuario INTEGER PRIMARY KEY AUTOINCREMENT,
     nome_completo TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     senha_hash TEXT NOT NULL,
     tipo_usuario TEXT NOT NULL CHECK(tipo_usuario IN ('administrador', 'proprietario', 'procurador')),
-    ativo INTEGER NOT NULL DEFAULT 1 CHECK(ativo IN (0,1))
+    ativo INTEGER NOT NULL DEFAULT 1 CHECK(ativo IN (0, 1))
 );
 
+CREATE TABLE IF NOT EXISTS sessao_usuario (
+    id_sessao INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_usuario INTEGER NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    criada_em TEXT NOT NULL,
+    expira_em TEXT NOT NULL,
+    encerrada_em TEXT,
+    ip TEXT,
+    navegador TEXT,
+    FOREIGN KEY(id_usuario) REFERENCES usuario(id_usuario)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessao_usuario_ativa
+    ON sessao_usuario(id_usuario, encerrada_em, expira_em);
+
 CREATE TABLE IF NOT EXISTS lote (
-    id_lote SERIAL PRIMARY KEY,
-    id_condominio INTEGER NOT NULL REFERENCES condominio(id_condominio),
-    id_usuario INTEGER NOT NULL REFERENCES usuario(id_usuario),
+    id_lote INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_condominio INTEGER NOT NULL,
+    id_usuario INTEGER NOT NULL,
     identificacao TEXT NOT NULL,
-    peso_original NUMERIC(10,2) NOT NULL CHECK(peso_original > 0),
-    inadimplente INTEGER NOT NULL DEFAULT 0 CHECK(inadimplente IN (0,1)),
+    peso_original REAL NOT NULL CHECK(peso_original > 0),
+    inadimplente INTEGER NOT NULL DEFAULT 0 CHECK(inadimplente IN (0, 1)),
+    FOREIGN KEY(id_condominio) REFERENCES condominio(id_condominio),
+    FOREIGN KEY(id_usuario) REFERENCES usuario(id_usuario),
     UNIQUE(id_condominio, identificacao)
 );
 
 CREATE TABLE IF NOT EXISTS reuniao (
-    id_reuniao SERIAL PRIMARY KEY,
-    id_condominio INTEGER NOT NULL REFERENCES condominio(id_condominio),
+    id_reuniao INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_condominio INTEGER NOT NULL,
     titulo TEXT NOT NULL,
     data TEXT NOT NULL,
     hora TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('agendada', 'em_andamento', 'encerrada'))
+    assunto TEXT NOT NULL,
+    url_video TEXT,
+    status TEXT NOT NULL CHECK(status IN ('agendada', 'em_andamento', 'encerrada')),
+    iniciou_em TEXT,
+    encerrada_em TEXT,
+    FOREIGN KEY(id_condominio) REFERENCES condominio(id_condominio)
 );
 
 CREATE TABLE IF NOT EXISTS convidado_reuniao (
-    id_convidado SERIAL PRIMARY KEY,
-    id_usuario INTEGER NOT NULL REFERENCES usuario(id_usuario),
-    id_reuniao INTEGER NOT NULL REFERENCES reuniao(id_reuniao),
+    id_convidado INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_usuario INTEGER NOT NULL,
+    id_reuniao INTEGER NOT NULL,
     status_convite TEXT NOT NULL DEFAULT 'confirmado',
-    status_presenca INTEGER NOT NULL DEFAULT 0 CHECK(status_presenca IN (0,1)),
-    data_hora_entrada TIMESTAMP,
-    data_hora_saida TIMESTAMP,
+    status_presenca INTEGER NOT NULL DEFAULT 0 CHECK(status_presenca IN (0, 1)),
+    data_hora_entrada TEXT,
+    data_hora_saida TEXT,
+    FOREIGN KEY(id_usuario) REFERENCES usuario(id_usuario),
+    FOREIGN KEY(id_reuniao) REFERENCES reuniao(id_reuniao),
     UNIQUE(id_usuario, id_reuniao)
 );
 
 CREATE TABLE IF NOT EXISTS pauta (
-    id_pauta SERIAL PRIMARY KEY,
-    id_reuniao INTEGER NOT NULL REFERENCES reuniao(id_reuniao),
+    id_pauta INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_reuniao INTEGER NOT NULL,
     assunto TEXT NOT NULL,
-    descricao TEXT
+    descricao TEXT,
+    FOREIGN KEY(id_reuniao) REFERENCES reuniao(id_reuniao)
+);
+
+CREATE TABLE IF NOT EXISTS anexo_pauta (
+    id_anexo INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_pauta INTEGER NOT NULL,
+    nome_arquivo TEXT NOT NULL,
+    url_arquivo TEXT NOT NULL,
+    FOREIGN KEY(id_pauta) REFERENCES pauta(id_pauta)
+);
+
+CREATE TABLE IF NOT EXISTS procuracao (
+    id_procuracao INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_reuniao INTEGER NOT NULL,
+    id_proprietario INTEGER NOT NULL,
+    id_procurador INTEGER NOT NULL,
+    documento TEXT NOT NULL,
+    ativa INTEGER NOT NULL DEFAULT 1 CHECK(ativa IN (0, 1)),
+    FOREIGN KEY(id_reuniao) REFERENCES reuniao(id_reuniao),
+    FOREIGN KEY(id_proprietario) REFERENCES usuario(id_usuario),
+    FOREIGN KEY(id_procurador) REFERENCES usuario(id_usuario),
+    UNIQUE(id_reuniao, id_proprietario, ativa)
 );
 
 CREATE TABLE IF NOT EXISTS votacao (
-    id_votacao SERIAL PRIMARY KEY,
-    id_pauta INTEGER NOT NULL REFERENCES pauta(id_pauta),
+    id_votacao INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_pauta INTEGER NOT NULL,
     assunto TEXT NOT NULL,
     pergunta TEXT NOT NULL,
     tipo_votacao TEXT NOT NULL CHECK(tipo_votacao IN ('aberta', 'fechada')),
-    tipo_resposta TEXT NOT NULL DEFAULT 'escolha_unica',
+    tipo_resposta TEXT NOT NULL DEFAULT 'escolha_unica'
+        CHECK(tipo_resposta IN ('escolha_unica', 'multipla_escolha', 'eleicao')),
     tempo_resposta INTEGER NOT NULL CHECK(tempo_resposta > 0),
-    max_marcacoes INTEGER NOT NULL DEFAULT 1,
-    status TEXT NOT NULL CHECK(status IN ('agendada', 'ativa', 'encerrada', 'invalidada')) DEFAULT 'agendada',
-    iniciou_em TIMESTAMP,
-    encerra_em TIMESTAMP,
-    encerrada_em TIMESTAMP
+    max_marcacoes INTEGER NOT NULL DEFAULT 1 CHECK(max_marcacoes > 0),
+    status TEXT NOT NULL DEFAULT 'agendada'
+        CHECK(status IN ('agendada', 'ativa', 'encerrada', 'invalidada')),
+    iniciou_em TEXT,
+    encerra_em TEXT,
+    encerrada_em TEXT,
+    FOREIGN KEY(id_pauta) REFERENCES pauta(id_pauta)
 );
 
 CREATE TABLE IF NOT EXISTS opcao_voto (
-    id_opcao SERIAL PRIMARY KEY,
-    id_votacao INTEGER NOT NULL REFERENCES votacao(id_votacao),
+    id_opcao INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_votacao INTEGER NOT NULL,
     descricao TEXT NOT NULL,
-    ordem INTEGER NOT NULL
+    ordem INTEGER NOT NULL,
+    FOREIGN KEY(id_votacao) REFERENCES votacao(id_votacao)
 );
 
 CREATE TABLE IF NOT EXISTS voto (
-    id_voto SERIAL PRIMARY KEY,
-    id_usuario INTEGER NOT NULL REFERENCES usuario(id_usuario),
-    id_votacao INTEGER NOT NULL REFERENCES votacao(id_votacao),
-    data_hora_voto TIMESTAMP NOT NULL,
-    peso_aplicado NUMERIC(10,2) NOT NULL,
+    id_voto INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_usuario INTEGER NOT NULL,
+    id_eleitor_representado INTEGER NOT NULL,
+    id_procuracao INTEGER,
+    id_votacao INTEGER NOT NULL,
+    data_hora_voto TEXT NOT NULL,
+    peso_aplicado REAL NOT NULL,
     ip TEXT,
     navegador TEXT,
-    UNIQUE(id_usuario, id_votacao)
+    FOREIGN KEY(id_usuario) REFERENCES usuario(id_usuario),
+    FOREIGN KEY(id_eleitor_representado) REFERENCES usuario(id_usuario),
+    FOREIGN KEY(id_procuracao) REFERENCES procuracao(id_procuracao),
+    FOREIGN KEY(id_votacao) REFERENCES votacao(id_votacao),
+    UNIQUE(id_votacao, id_eleitor_representado)
 );
 
 CREATE TABLE IF NOT EXISTS voto_escolha (
-    id_voto_escolha SERIAL PRIMARY KEY,
-    id_voto INTEGER NOT NULL REFERENCES voto(id_voto),
-    id_opcao INTEGER NOT NULL REFERENCES opcao_voto(id_opcao),
+    id_voto_escolha INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_voto INTEGER NOT NULL,
+    id_opcao INTEGER NOT NULL,
+    FOREIGN KEY(id_voto) REFERENCES voto(id_voto),
+    FOREIGN KEY(id_opcao) REFERENCES opcao_voto(id_opcao),
     UNIQUE(id_voto, id_opcao)
 );
 
 CREATE TABLE IF NOT EXISTS log_auditoria (
-    id_log SERIAL PRIMARY KEY,
-    id_usuario INTEGER REFERENCES usuario(id_usuario),
+    id_log INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_usuario INTEGER,
     acao TEXT NOT NULL,
     entidade TEXT NOT NULL,
-    data_hora TIMESTAMP NOT NULL,
+    data_hora TEXT NOT NULL,
     ip TEXT,
-    navegador TEXT
+    navegador TEXT,
+    FOREIGN KEY(id_usuario) REFERENCES usuario(id_usuario)
 );
