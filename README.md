@@ -37,7 +37,6 @@ seed.py                         massa de dados para demonstracao
 Requisito: Python 3.10 ou superior.
 
 ```bash
-cd implementacao_codex
 python seed.py
 python app.py
 ```
