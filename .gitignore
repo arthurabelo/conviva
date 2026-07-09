@@ -1,1 +1,5 @@
 .env
+CONVIVA.zip
+DOCUMENTACAO_CODIGO.pdf
+src/__pycache__/__init__.cpython-312.pyc
+data/conviva.sqlite3
