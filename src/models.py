@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -10,27 +11,12 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import psycopg
 from psycopg.rows import dict_row
 
+import psycopg
+from psycopg.rows import dict_row
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = BASE_DIR / "schema.sql"
-DATABASE_URL = (
-    os.getenv("DATABASE_URL")
-)
-LIBPQ_QUERY_PARAMS = {
-    "application_name",
-    "connect_timeout",
-    "gssencmode",
-    "keepalives",
-    "keepalives_count",
-    "keepalives_idle",
-    "keepalives_interval",
-    "sslcert",
-    "sslcompression",
-    "sslcrl",
-    "sslkey",
-    "sslmode",
-    "sslrootcert",
-    "target_session_attrs",
-}
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("STORAGE_POSTGRES_URL") or os.getenv("STORAGE_POSTGRES_PRISMA_URL") or os.getenv("STORAGE_POSTGRES_URL_NON_POOLING")
 
 INSERT_PRIMARY_KEYS = {
     "condominio": "id_condominio",
@@ -106,93 +92,20 @@ class Votacao:
         )
 
 
-def normalize_database_url(url: str) -> str:
-    parsed = urlsplit(url)
-    if parsed.scheme not in {"postgres", "postgresql"}:
-        return url
-    query = urlencode(
-        [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key in LIBPQ_QUERY_PARAMS]
-    )
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
-
-
-def prepare_sql(sql: str) -> str:
-    return sql.replace("?", "%s")
-
-<<<<<<< ours
-<<<<<<< ours
-
-def insert_returning_sql(sql: str) -> str:
-    if re.search(r"\bRETURNING\b", sql, re.IGNORECASE):
-        return sql
-    match = re.match(r"\s*INSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)", sql, re.IGNORECASE)
-    if not match:
-        return sql
-    primary_key = INSERT_PRIMARY_KEYS.get(match.group(1).lower())
-    if not primary_key:
-        return sql
-    return f"{sql.rstrip().rstrip(';')} RETURNING {primary_key}"
-
-
 class Database:
-    def __init__(self, url: str | None = DATABASE_URL):
-        self.url = url
+    def __init__(self, path: Path = DB_PATH):
+        self.path = Path(path)
 
-=======
-
-def insert_returning_sql(sql: str) -> str:
-    if re.search(r"\bRETURNING\b", sql, re.IGNORECASE):
-        return sql
-    match = re.match(r"\s*INSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)", sql, re.IGNORECASE)
-    if not match:
-        return sql
-    primary_key = INSERT_PRIMARY_KEYS.get(match.group(1).lower())
-    if not primary_key:
-        return sql
-    return f"{sql.rstrip().rstrip(';')} RETURNING {primary_key}"
-
-=======
-
-def insert_returning_sql(sql: str) -> str:
-    if re.search(r"\bRETURNING\b", sql, re.IGNORECASE):
-        return sql
-    match = re.match(r"\s*INSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)", sql, re.IGNORECASE)
-    if not match:
-        return sql
-    primary_key = INSERT_PRIMARY_KEYS.get(match.group(1).lower())
-    if not primary_key:
-        return sql
-    return f"{sql.rstrip().rstrip(';')} RETURNING {primary_key}"
-
->>>>>>> theirs
-
-class Database:
-    def __init__(self, url: str | None = None):
-        raw_url = url or DATABASE_URL
-        self.url = normalize_database_url(raw_url) if raw_url else None
-
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
-    def connect(self) -> psycopg.Connection:
-        if not self.url:
-            raise RuntimeError(
-                "Configure DATABASE_URL ou STORAGE_POSTGRES_URL com a URL Postgres do Supabase."
-            )
-<<<<<<< ours
-<<<<<<< ours
-        return psycopg.connect(normalize_database_url(self.url), row_factory=dict_row)
-=======
-        return psycopg.connect(self.url, row_factory=dict_row)
->>>>>>> theirs
-=======
-        return psycopg.connect(self.url, row_factory=dict_row)
->>>>>>> theirs
+    def connect(self) -> sqlite3.Connection:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(self.path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
 
     def init_db(self) -> None:
         with self.connect() as conn:
-            conn.execute(SCHEMA_PATH.read_text(encoding="utf-8"))
+            conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
             conn.commit()
 
     def reset_db(self) -> None:
@@ -213,31 +126,31 @@ class Database:
             "condominio",
         ]
         with self.connect() as conn:
+            conn.execute("PRAGMA foreign_keys = OFF")
             for table in drops:
-                conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+                conn.execute(f"DROP TABLE IF EXISTS {table}")
             conn.commit()
         self.init_db()
 
     def query(self, sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            rows = conn.execute(prepare_sql(sql), tuple(params)).fetchall()
+            rows = conn.execute(sql, tuple(params)).fetchall()
             return [dict(row) for row in rows]
 
     def query_one(self, sql: str, params: Iterable[Any] = ()) -> dict[str, Any] | None:
         with self.connect() as conn:
-            row = conn.execute(prepare_sql(sql), tuple(params)).fetchone()
+            row = conn.execute(sql, tuple(params)).fetchone()
             return dict(row) if row else None
 
     def execute(self, sql: str, params: Iterable[Any] = ()) -> int:
         with self.connect() as conn:
-            cursor = conn.execute(insert_returning_sql(prepare_sql(sql)), tuple(params))
-            row = cursor.fetchone() if cursor.description else None
+            cursor = conn.execute(sql, tuple(params))
             conn.commit()
-            return int(next(iter(row.values())) if row else 0)
+            return int(cursor.lastrowid or 0)
 
     def execute_many(self, sql: str, seq_of_params: Iterable[Iterable[Any]]) -> None:
         with self.connect() as conn:
-            conn.executemany(prepare_sql(sql), [tuple(params) for params in seq_of_params])
+            conn.executemany(sql, [tuple(params) for params in seq_of_params])
             conn.commit()
 
 

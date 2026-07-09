@@ -1,7 +1,11 @@
 # CONVIVA - Modulo de Votacao
 
 Implementacao web em Python puro para o recorte de votacao do sistema CONVIVA.
+<<<<<<< HEAD
 O projeto segue MVC Web e usa PostgreSQL, com suporte a conexao pelo Supabase.
+=======
+O projeto segue MVC Web e usa PostgreSQL, com suporte a conexão pelo Supabase.
+>>>>>>> 6152ee2d4767848ff11da29302ef809c7e123796
 
 ## Funcionalidades
 
@@ -22,11 +26,11 @@ O projeto segue MVC Web e usa PostgreSQL, com suporte a conexao pelo Supabase.
 
 ```text
 app.py                         servidor HTTP e roteamento inicial
-conviva/controllers.py          controladores MVC e endpoints JSON
-conviva/services.py             regras de negocio e casos de uso
-conviva/models.py               entidades, banco de dados e repositorios
-conviva/templates.py            views HTML
-conviva/security.py             hash de senha, token e cookies
+src/controllers.py          controladores MVC e endpoints JSON
+src/services.py             regras de negocio e casos de uso
+src/models.py               entidades, banco de dados e repositorios
+src/templates.py            views HTML
+src/security.py             hash de senha, token e cookies
 static/                         CSS e JavaScript da tela de reuniao
 schema.sql                      schema PostgreSQL
 seed.py                         massa de dados para demonstracao
@@ -36,7 +40,19 @@ seed.py                         massa de dados para demonstracao
 
 Requisitos: Python 3.10 ou superior e um banco PostgreSQL/Supabase.
 
+<<<<<<< HEAD
 Configure uma das variaveis abaixo com a URL Postgres do Supabase:
+=======
+Configure uma das variáveis abaixo com a URL Postgres do Supabase:
+
+```bash
+export STORAGE_POSTGRES_URL="postgres://..."
+# ou
+export DATABASE_URL="postgres://..."
+```
+
+Instale as dependências e inicialize os dados de demonstração:
+>>>>>>> 6152ee2d4767848ff11da29302ef809c7e123796
 
 ```bash
 export STORAGE_POSTGRES_URL="postgres://..."
