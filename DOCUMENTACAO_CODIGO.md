@@ -152,7 +152,7 @@ Classe de infraestrutura que centraliza conexao, criacao do banco e execucao de 
 
 #### Metodo `__init__(self, url: str | None = DATABASE_URL)`
 
-Define a URL PostgreSQL/Supabase usada pela instancia.
+Define a URL PostgreSQL/Supabase usada pela instância.
 
 #### Metodo `connect(self) -> psycopg.Connection`
 
