@@ -36,7 +36,7 @@ seed.py                         massa de dados para demonstracao
 
 Requisitos: Python 3.10 ou superior e um banco PostgreSQL/Supabase.
 
-Configure uma das variaveis abaixo com a URL Postgres do Supabase:
+Configure uma das variáveis abaixo com a URL Postgres do Supabase:
 
 ```bash
 export STORAGE_POSTGRES_URL="postgres://..."
