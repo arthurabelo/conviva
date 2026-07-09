@@ -44,7 +44,7 @@ export STORAGE_POSTGRES_URL="postgres://..."
 export DATABASE_URL="postgres://..."
 ```
 
-Instale as dependencias e inicialize os dados de demonstracao:
+Instale as dependências e inicialize os dados de demonstração:
 
 ```bash
 python seed.py
