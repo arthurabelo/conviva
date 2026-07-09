@@ -41,7 +41,7 @@ Inicializa o banco de dados, cria o servidor `ThreadingHTTPServer`, mostra a URL
 
 ## `seed.py`
 
-Arquivo usado para recriar o banco SQLite e popular dados de demonstracao.
+Arquivo usado para recriar o banco PostgreSQL/Supabase e popular dados de demonstração.
 
 ### Funcao `main() -> None`
 
@@ -97,14 +97,13 @@ Converte o cabecalho HTTP `Cookie` em um dicionario simples, permitindo recupera
 
 ## `conviva/models.py`
 
-Arquivo da camada Model/Repository. Contem entidades simples, conexao com SQLite e repositorios responsaveis por consultas e comandos SQL.
+Arquivo da camada Model/Repository. Contém entidades simples, conexão com PostgreSQL/Supabase e repositórios responsáveis por consultas e comandos SQL.
 
 ### Constantes
 
 - `BASE_DIR`: pasta base da implementacao.
-- `DATA_DIR`: pasta onde o banco SQLite fica salvo.
-- `DB_PATH`: caminho completo para `data/conviva.sqlite3`.
 - `SCHEMA_PATH`: caminho para `schema.sql`.
+- `DATABASE_URL`: URL de conexao PostgreSQL, lida de `DATABASE_URL`, `STORAGE_POSTGRES_URL`, `STORAGE_POSTGRES_PRISMA_URL` ou `STORAGE_POSTGRES_URL_NON_POOLING`.
 
 ### Classe `Usuario`
 
@@ -151,13 +150,13 @@ Converte uma linha do banco em objeto `Votacao`, normalizando campos numericos e
 
 Classe de infraestrutura que centraliza conexao, criacao do banco e execucao de SQL.
 
-#### Metodo `__init__(self, path: Path = DB_PATH)`
+#### Metodo `__init__(self, url: str | None = DATABASE_URL)`
 
-Define qual arquivo SQLite sera usado pela instancia.
+Define a URL PostgreSQL/Supabase usada pela instância.
 
-#### Metodo `connect(self) -> sqlite3.Connection`
+#### Metodo `connect(self) -> psycopg.Connection`
 
-Cria a pasta do banco se necessario, abre conexao SQLite, configura retorno de linhas como `sqlite3.Row` e ativa chaves estrangeiras.
+Abre conexão PostgreSQL usando `psycopg` e configura retorno de linhas como dicionários.
 
 #### Metodo `init_db(self) -> None`
 
