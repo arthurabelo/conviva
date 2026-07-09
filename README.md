@@ -1,7 +1,7 @@
 # CONVIVA - Modulo de Votacao
 
 Implementacao web em Python puro para o recorte de votacao do sistema CONVIVA.
-O projeto segue MVC Web e usa PostgreSQL, com suporte a conexao pelo Supabase.
+O projeto segue MVC Web e usa PostgreSQL, com suporte a conexão pelo Supabase.
 
 ## Funcionalidades
 
