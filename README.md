@@ -47,7 +47,6 @@ export DATABASE_URL="postgres://..."
 Instale as dependencias e inicialize os dados de demonstracao:
 
 ```bash
-pip install -r requirements.txt
 python seed.py
 python app.py
 ```
