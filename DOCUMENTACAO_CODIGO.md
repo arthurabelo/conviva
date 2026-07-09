@@ -41,7 +41,7 @@ Inicializa o banco de dados, cria o servidor `ThreadingHTTPServer`, mostra a URL
 
 ## `seed.py`
 
-Arquivo usado para recriar o banco PostgreSQL/Supabase e popular dados de demonstracao.
+Arquivo usado para recriar o banco PostgreSQL/Supabase e popular dados de demonstração.
 
 ### Funcao `main() -> None`
 
