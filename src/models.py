@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,7 +8,7 @@ from typing import Any, Iterable
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
-DB_PATH = DATA_DIR / "conviva.sqlite3"
+DB_PATH = Path(os.getenv("CONVIVA_DB_PATH", "/tmp/conviva.sqlite3" if os.getenv("VERCEL") == "1" else str(DATA_DIR / "conviva.sqlite3")))
 SCHEMA_PATH = BASE_DIR / "schema.sql"
 
 
