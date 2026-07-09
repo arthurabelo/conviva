@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import re
 from dataclasses import dataclass
 from email.message import Message
@@ -72,6 +73,16 @@ class ApplicationController:
 
     def ensure_database(self) -> None:
         self.db.init_db()
+        auto_seed = os.getenv("CONVIVA_AUTO_SEED", "1" if os.getenv("VERCEL") == "1" else "0") == "1"
+        if not auto_seed:
+            return
+        row = self.db.query_one("SELECT COUNT(*) AS total FROM usuario")
+        if row and int(row.get("total", 0)) > 0:
+            return
+        # Import local para evitar custo e dependencias em chamadas onde nao ha seed.
+        from seed import main as seed_main
+
+        seed_main()
 
     def dispatch(
         self,
