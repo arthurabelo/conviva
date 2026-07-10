@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import re
-import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -11,12 +10,15 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import psycopg
 from psycopg.rows import dict_row
 
-import psycopg
-from psycopg.rows import dict_row
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = BASE_DIR / "schema.sql"
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("STORAGE_POSTGRES_URL") or os.getenv("STORAGE_POSTGRES_PRISMA_URL") or os.getenv("STORAGE_POSTGRES_URL_NON_POOLING")
+LIBPQ_QUERY_PARAMS = {
+    "application_name", "connect_timeout", "gssencmode", "keepalives",
+    "keepalives_count", "keepalives_idle", "keepalives_interval", "sslcert",
+    "sslcompression", "sslcrl", "sslkey", "sslmode", "sslrootcert",
+    "target_session_attrs",
+}
 
 INSERT_PRIMARY_KEYS = {
     "condominio": "id_condominio",
@@ -92,20 +94,43 @@ class Votacao:
         )
 
 
-class Database:
-    def __init__(self, path: Path = DB_PATH):
-        self.path = Path(path)
+def normalize_database_url(url: str) -> str:
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"postgres", "postgresql"}:
+        return url
+    query = urlencode(
+        [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key in LIBPQ_QUERY_PARAMS]
+    )
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
 
-    def connect(self) -> sqlite3.Connection:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+
+def prepare_sql(sql: str) -> str:
+    return sql.replace("?", "%s")
+
+
+def insert_returning_sql(sql: str) -> str:
+    if re.search(r"\bRETURNING\b", sql, re.IGNORECASE):
+        return sql
+    match = re.match(r"\s*INSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)", sql, re.IGNORECASE)
+    primary_key = INSERT_PRIMARY_KEYS.get(match.group(1).lower()) if match else None
+    if not primary_key:
+        return sql
+    return f"{sql.rstrip().rstrip(';')} RETURNING {primary_key}"
+
+
+class Database:
+    def __init__(self, url: str | None = None):
+        raw_url = url or DATABASE_URL
+        self.url = normalize_database_url(raw_url) if raw_url else None
+
+    def connect(self) -> psycopg.Connection:
+        if not self.url:
+            raise RuntimeError("Configure DATABASE_URL ou STORAGE_POSTGRES_URL com a URL PostgreSQL.")
+        return psycopg.connect(self.url, row_factory=dict_row)
 
     def init_db(self) -> None:
         with self.connect() as conn:
-            conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            conn.execute(SCHEMA_PATH.read_text(encoding="utf-8"), prepare=False)
             conn.commit()
 
     def reset_db(self) -> None:
@@ -126,31 +151,30 @@ class Database:
             "condominio",
         ]
         with self.connect() as conn:
-            conn.execute("PRAGMA foreign_keys = OFF")
             for table in drops:
-                conn.execute(f"DROP TABLE IF EXISTS {table}")
+                conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
             conn.commit()
         self.init_db()
 
     def query(self, sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            rows = conn.execute(sql, tuple(params)).fetchall()
-            return [dict(row) for row in rows]
+            return list(conn.execute(prepare_sql(sql), tuple(params)).fetchall())
 
     def query_one(self, sql: str, params: Iterable[Any] = ()) -> dict[str, Any] | None:
         with self.connect() as conn:
-            row = conn.execute(sql, tuple(params)).fetchone()
-            return dict(row) if row else None
+            return conn.execute(prepare_sql(sql), tuple(params)).fetchone()
 
     def execute(self, sql: str, params: Iterable[Any] = ()) -> int:
         with self.connect() as conn:
-            cursor = conn.execute(sql, tuple(params))
+            statement = insert_returning_sql(prepare_sql(sql))
+            cursor = conn.execute(statement, tuple(params))
+            row = cursor.fetchone() if re.search(r"\bRETURNING\b", statement, re.IGNORECASE) else None
             conn.commit()
-            return int(cursor.lastrowid or 0)
+            return int(next(iter(row.values()))) if row else 0
 
     def execute_many(self, sql: str, seq_of_params: Iterable[Iterable[Any]]) -> None:
         with self.connect() as conn:
-            conn.executemany(sql, [tuple(params) for params in seq_of_params])
+            conn.executemany(prepare_sql(sql), [tuple(params) for params in seq_of_params])
             conn.commit()
 
 
@@ -168,6 +192,90 @@ class UsuarioRepository:
         return self.db.query_one(
             "SELECT * FROM usuario WHERE id_usuario = ? AND ativo = 1",
             [id_usuario],
+        )
+
+    def get_any(self, id_usuario: int) -> dict[str, Any] | None:
+        return self.db.query_one("SELECT * FROM usuario WHERE id_usuario = ?", [id_usuario])
+
+    def list_active(self, nome: str = "", tipo: str = "") -> list[dict[str, Any]]:
+        clauses = ["ativo = 1"]
+        params: list[Any] = []
+        if nome.strip():
+            clauses.append("lower(nome_completo) LIKE ?")
+            params.append(f"%{nome.strip().lower()}%")
+        if tipo in {"administrador", "proprietario"}:
+            clauses.append("tipo_usuario = ?")
+            params.append(tipo)
+        return self.db.query(
+            f"SELECT * FROM usuario WHERE {' AND '.join(clauses)} ORDER BY nome_completo",
+            params,
+        )
+
+    def email_in_use(self, email: str, except_id: int | None = None) -> bool:
+        sql = "SELECT 1 FROM usuario WHERE lower(email) = ?"
+        params: list[Any] = [email.strip().lower()]
+        if except_id is not None:
+            sql += " AND id_usuario <> ?"
+            params.append(except_id)
+        return bool(self.db.query_one(sql, params))
+
+    def create(self, nome: str, email: str, senha_hash: str, tipo: str) -> int:
+        return self.db.execute(
+            "INSERT INTO usuario (nome_completo, email, senha_hash, tipo_usuario, ativo) VALUES (?, ?, ?, ?, 1)",
+            [nome, email, senha_hash, tipo],
+        )
+
+    def update(self, id_usuario: int, nome: str, email: str, tipo: str, senha_hash: str | None = None) -> None:
+        if senha_hash:
+            self.db.execute(
+                "UPDATE usuario SET nome_completo = ?, email = ?, tipo_usuario = ?, senha_hash = ? WHERE id_usuario = ? AND ativo = 1",
+                [nome, email, tipo, senha_hash, id_usuario],
+            )
+        else:
+            self.db.execute(
+                "UPDATE usuario SET nome_completo = ?, email = ?, tipo_usuario = ? WHERE id_usuario = ? AND ativo = 1",
+                [nome, email, tipo, id_usuario],
+            )
+
+    def deactivate(self, id_usuario: int) -> None:
+        self.db.execute("UPDATE usuario SET ativo = 0 WHERE id_usuario = ?", [id_usuario])
+
+    def default_condominio(self) -> dict[str, Any] | None:
+        return self.db.query_one("SELECT * FROM condominio WHERE status = 'ativo' ORDER BY id_condominio LIMIT 1")
+
+    def lots(self, id_usuario: int, id_condominio: int) -> list[dict[str, Any]]:
+        return self.db.query(
+            "SELECT * FROM lote WHERE id_usuario = ? AND id_condominio = ? ORDER BY identificacao",
+            [id_usuario, id_condominio],
+        )
+
+    def lot(self, id_lote: int) -> dict[str, Any] | None:
+        return self.db.query_one("SELECT * FROM lote WHERE id_lote = ?", [id_lote])
+
+    def lot_in_use(self, id_condominio: int, identificacao: str, except_id: int | None = None) -> bool:
+        sql = "SELECT 1 FROM lote WHERE id_condominio = ? AND lower(identificacao) = ?"
+        params: list[Any] = [id_condominio, identificacao.strip().lower()]
+        if except_id is not None:
+            sql += " AND id_lote <> ?"
+            params.append(except_id)
+        return bool(self.db.query_one(sql, params))
+
+    def save_lot(self, id_usuario: int, id_condominio: int, identificacao: str, peso: float, inadimplente: bool, id_lote: int | None = None) -> int:
+        if id_lote is not None:
+            self.db.execute(
+                "UPDATE lote SET identificacao = ?, peso_original = ?, inadimplente = ? WHERE id_lote = ? AND id_usuario = ? AND id_condominio = ?",
+                [identificacao, peso, int(inadimplente), id_lote, id_usuario, id_condominio],
+            )
+            return id_lote
+        return self.db.execute(
+            "INSERT INTO lote (id_condominio, id_usuario, identificacao, peso_original, inadimplente) VALUES (?, ?, ?, ?, ?)",
+            [id_condominio, id_usuario, identificacao, peso, int(inadimplente)],
+        )
+
+    def delete_lot(self, id_lote: int, id_usuario: int, id_condominio: int) -> None:
+        self.db.execute(
+            "DELETE FROM lote WHERE id_lote = ? AND id_usuario = ? AND id_condominio = ?",
+            [id_lote, id_usuario, id_condominio],
         )
 
 

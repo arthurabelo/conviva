@@ -11,7 +11,7 @@ def h(value: Any) -> str:
 def base(title: str, content: str, user: dict[str, Any] | None = None, script: str = "") -> str:
     nav = ""
     if user:
-        admin_link = "<a href='#'>Usuários</a><a href='/logs'>Auditoria</a>" if user["tipo_usuario"] == "administrador" else ""
+        admin_link = "<a href='/usuarios'>Usuários</a><a href='/logs'>Auditoria</a>" if user["tipo_usuario"] == "administrador" else ""
         nav = f"""
         <header class="topbar">
             <a class="brand" href="/">CONVIVA</a>
@@ -448,6 +448,130 @@ def resultado(user: dict[str, Any], result: dict[str, Any], warning: str = "") -
     {nominal}
     """
     return base("Resultado", content, user)
+
+
+def tipo_usuario_label(tipo: str) -> str:
+    return {"administrador": "Administrador/Síndico", "proprietario": "Proprietário", "procurador": "Procurador"}.get(tipo, tipo.title())
+
+
+def usuarios(user: dict[str, Any], rows: list[dict[str, Any]], nome: str = "", tipo: str = "", message: str = "", error: str = "") -> str:
+    body = []
+    for usuario in rows:
+        user_id = int(usuario["id_usuario"])
+        lote_action = f"<a class='button small secondary' href='/usuarios/{user_id}/lotes'>Gerenciar lotes</a>" if usuario["tipo_usuario"] == "proprietario" else ""
+        body.append(f"""
+        <tr>
+            <td><span class="code-cell">{user_id:04d}</span></td>
+            <td><strong>{h(usuario["nome_completo"])}</strong></td>
+            <td><span class="profile-pill profile-{h(usuario['tipo_usuario'])}">{h(tipo_usuario_label(str(usuario["tipo_usuario"])))}</span></td>
+            <td>{h(usuario["email"])}</td>
+            <td><div class="row-actions user-actions">
+                <a class="button small secondary" href="/usuarios/{user_id}">Visualizar</a>
+                <a class="button small secondary" href="/usuarios/{user_id}/editar">Alterar</a>
+                {lote_action}
+                <form method="post" action="/usuarios/{user_id}/excluir" onsubmit="return confirm('Confirma a exclusão deste usuário?')"><button class="small danger-outline" type="submit">Excluir</button></form>
+            </div></td>
+        </tr>""")
+    content = f"""
+    <section class="section-head">
+        <div><p class="eyebrow">Administração</p><h1>Gestão de usuários</h1><p class="muted">Cadastre acessos e gerencie as unidades dos proprietários.</p></div>
+        <a class="button primary" href="/usuarios/novo">Novo usuário</a>
+    </section>
+    {alert(message, "success")}{alert(error, "error")}
+    <section class="panel filter-panel">
+        <div class="panel-head"><div><p class="eyebrow">Filtros</p><h2>Pesquisa por usuários</h2></div></div>
+        <form class="user-filter" method="get" action="/usuarios">
+            <label>Nome<input name="nome" value="{h(nome)}" placeholder="Digite o nome do usuário"></label>
+            <label>Tipo<select name="tipo">
+                <option value="" {'selected' if not tipo else ''}>Todos</option>
+                <option value="administrador" {'selected' if tipo == 'administrador' else ''}>Administrador/Síndico</option>
+                <option value="proprietario" {'selected' if tipo == 'proprietario' else ''}>Proprietário</option>
+            </select></label>
+            <button class="primary" type="submit">Pesquisar</button><a class="button secondary" href="/usuarios">Limpar</a>
+        </form>
+    </section>
+    <section class="panel">
+        <div class="panel-head"><div><p class="eyebrow">Cadastros</p><h2>Tabela de usuários</h2></div><span class="result-count">{len(rows)} usuário(s)</span></div>
+        <div class="table-wrap"><table class="users-table"><thead><tr><th>Código</th><th>Nome</th><th>Tipo</th><th>E-mail</th><th>Comandos</th></tr></thead><tbody>{''.join(body) or "<tr><td colspan='5' class='empty-cell'>Nenhum usuário encontrado.</td></tr>"}</tbody></table></div>
+    </section>"""
+    return base("Gestão de usuários", content, user)
+
+
+def form_usuario(user: dict[str, Any], usuario: dict[str, Any], error: str = "", id_usuario: int | None = None) -> str:
+    editing = id_usuario is not None
+    action = f"/usuarios/{id_usuario}/editar" if editing else "/usuarios/novo"
+    title = "Editar usuário" if editing else "Novo usuário"
+    tipo = str(usuario.get("tipo_usuario", "proprietario"))
+    code = f"{id_usuario:04d}" if id_usuario is not None else "Gerado automaticamente"
+    content = f"""
+    <section class="section-head"><div><p class="eyebrow">Gestão de usuários</p><h1>{title}</h1><p class="muted">Preencha os dados de acesso. Campos com * são obrigatórios.</p></div><a class="button secondary" href="/usuarios">Voltar à lista</a></section>
+    <form class="panel form-grid user-form" method="post" action="{action}">
+        {alert(error, "error")}<div class="wide form-section-title"><span>Dados cadastrais</span></div>
+        <label>Código<input value="{code}" disabled><small>Identificador protegido pelo sistema.</small></label>
+        <label>Tipo de usuário *<select name="tipo_usuario" required><option value="administrador" {'selected' if tipo == 'administrador' else ''}>Administrador/Síndico</option><option value="proprietario" {'selected' if tipo == 'proprietario' else ''}>Proprietário</option></select></label>
+        <label class="wide">Nome completo *<input name="nome_completo" maxlength="255" required value="{h(usuario.get('nome_completo', ''))}" placeholder="Nome e sobrenome"></label>
+        <label>E-mail *<input name="email" type="email" maxlength="255" autocomplete="username" required value="{h(usuario.get('email', ''))}" placeholder="usuario@email.com"><small>Este endereço será usado para entrar no sistema.</small></label>
+        <label>{'Nova senha' if editing else 'Senha temporária *'}<input name="senha" type="password" minlength="6" autocomplete="new-password" {'required' if not editing else ''} placeholder="{'Deixe em branco para manter' if editing else 'Mínimo de 6 caracteres'}"><small>{'Preencha somente se desejar redefinir a senha.' if editing else 'A senha será armazenada de forma criptografada.'}</small></label>
+        <div class="wide form-actions"><a class="button secondary" href="/usuarios">Cancelar</a><button class="primary" type="submit">Salvar usuário</button></div>
+    </form>"""
+    return base(title, content, user)
+
+
+def visualizar_usuario(user: dict[str, Any], usuario: dict[str, Any], lotes: list[dict[str, Any]]) -> str:
+    user_id = int(usuario["id_usuario"])
+    total = sum(float(lote["peso_original"]) for lote in lotes)
+    efetivo = sum(float(lote["peso_original"]) for lote in lotes if not lote["inadimplente"])
+    lot_summary = ""
+    if usuario["tipo_usuario"] == "proprietario":
+        lot_summary = f"""<section class="panel"><div class="panel-head"><div><p class="eyebrow">Propriedade</p><h2>Lotes vinculados</h2></div><a class="button small secondary" href="/usuarios/{user_id}/lotes">Gerenciar lotes</a></div><div class="summary-cards"><div><span>Unidades</span><strong>{len(lotes)}</strong></div><div><span>Peso acumulado</span><strong>{total:.2f}</strong></div><div><span>Peso efetivo</span><strong>{efetivo:.2f}</strong></div></div></section>"""
+    content = f"""
+    <section class="section-head"><div><p class="eyebrow">Gestão de usuários</p><h1>Detalhes do usuário</h1></div><div class="row-actions"><a class="button secondary" href="/usuarios">Voltar</a><a class="button primary" href="/usuarios/{user_id}/editar">Alterar cadastro</a></div></section>
+    <section class="panel detail-panel"><div class="avatar">{h(str(usuario['nome_completo'])[:1].upper())}</div><div><span>Código</span><strong>{user_id:04d}</strong></div><div><span>Nome completo</span><strong>{h(usuario['nome_completo'])}</strong></div><div><span>E-mail</span><strong>{h(usuario['email'])}</strong></div><div><span>Tipo de usuário</span><strong>{h(tipo_usuario_label(str(usuario['tipo_usuario'])))}</strong></div></section>{lot_summary}"""
+    return base("Detalhes do usuário", content, user)
+
+
+def lotes_table(id_usuario: int, lotes: list[dict[str, Any]]) -> str:
+    rows = []
+    total = 0.0
+    efetivo = 0.0
+    for lote in lotes:
+        peso = float(lote["peso_original"])
+        inadimplente = bool(lote["inadimplente"])
+        total += peso
+        efetivo += 0 if inadimplente else peso
+        lot_id = int(lote["id_lote"])
+        status = "Inadimplente (Dívida Ativa)" if inadimplente else "Adimplente"
+        rows.append(f"""
+        <tr><td><strong>{h(lote['identificacao'])}</strong></td><td>{peso:.2f}</td><td class="{'debt-status' if inadimplente else 'ok-status'}">{status}</td><td><strong>{0.0 if inadimplente else peso:.2f}</strong></td><td><div class="row-actions">
+            <button class="small secondary" type="button" data-lote-edit data-id="{lot_id}" data-identificacao="{h(lote['identificacao'])}" data-peso="{peso:.2f}" data-inadimplente="{1 if inadimplente else 0}">Editar</button>
+            <button class="small danger-outline" type="button" data-lote-delete="{lot_id}" data-owner="{id_usuario}">Excluir</button>
+        </div></td></tr>""")
+    return f"""<div class="table-wrap"><table class="lots-table">
+        <thead><tr><th>Lote/Unidade</th><th>Peso original</th><th>Status financeiro</th><th>Peso efetivo no voto</th><th>Comandos</th></tr></thead>
+        <tbody>{''.join(rows) or "<tr><td colspan='5' class='empty-cell'>Nenhum lote vinculado.</td></tr>"}</tbody>
+        <tfoot><tr><th colspan="2">Total de peso acumulado: <strong data-total-original>{total:.2f}</strong></th><th colspan="3">Total efetivo: <strong data-total-effective>{efetivo:.2f}</strong></th></tr></tfoot>
+    </table></div>"""
+
+
+def gerenciar_lotes(user: dict[str, Any], usuario: dict[str, Any], condominio: dict[str, Any], lotes: list[dict[str, Any]], message: str = "", error: str = "") -> str:
+    user_id = int(usuario["id_usuario"])
+    content = f"""
+    <section class="section-head"><div><p class="eyebrow">Gestão de usuários</p><h1>Gerenciamento de lotes</h1><p class="muted">{h(condominio['nome'])}</p></div><a class="button secondary" href="/usuarios">Finalizar vínculos</a></section>
+    <section class="owner-banner"><div class="avatar small-avatar">{h(str(usuario['nome_completo'])[:1].upper())}</div><div><span>Proprietário selecionado</span><strong>Código {user_id:04d} · {h(usuario['nome_completo'])}</strong></div></section>
+    <div id="lot-feedback">{alert(message, 'success')}{alert(error, 'error')}</div>
+    <section class="panel">
+        <div class="panel-head"><div><p class="eyebrow">Unidade</p><h2 id="lot-form-title">Vincular novo lote/unidade</h2></div><button class="small secondary hidden" id="cancel-lot-edit" type="button">Cancelar edição</button></div>
+        <form class="lot-form" id="lot-form" method="post" action="/api/usuarios/{user_id}/lotes">
+            <input type="hidden" name="id_lote" id="id_lote">
+            <label>Identificação do lote *<input name="identificacao" id="identificacao" required placeholder="Bloco A - Apto 302"></label>
+            <label>Peso *<input name="peso_original" id="peso_original" type="number" min="0.01" step="0.01" required value="1.00"><small>Número decimal correspondente ao peso político do voto.</small></label>
+            <label>Inadimplente *<select name="inadimplente" id="inadimplente"><option value="0">Não</option><option value="1">Sim</option></select><small>Se “Sim”, o peso efetivo torna-se 0.00 automaticamente.</small></label>
+            <div class="lot-preview"><span>Peso efetivo previsto</span><strong id="effective-preview">1.00</strong></div>
+            <button class="primary" type="submit" id="lot-submit">Vincular lote</button>
+        </form>
+    </section>
+    <section class="panel"><div class="panel-head"><div><p class="eyebrow">Frações ideais</p><h2>Tabela de lotes vinculados</h2></div></div><div id="lots-table-container">{lotes_table(user_id, lotes)}</div></section>"""
+    return base("Gerenciamento de lotes", content, user, '<script src="/static/usuarios.js"></script>')
 
 
 def logs(user: dict[str, Any], rows: list[dict[str, Any]]) -> str:

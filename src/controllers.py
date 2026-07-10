@@ -68,6 +68,7 @@ class ApplicationController:
         self.auditoria_repo = models.AuditoriaRepository(self.db)
         self.auditoria = services.AuditoriaService(self.auditoria_repo)
         self.auth = services.AuthService(self.db, self.usuarios, self.auditoria)
+        self.user_management = services.UserManagementService(self.usuarios, self.auditoria)
         self.reuniao_service = services.ReuniaoService(self.reunioes, self.auditoria)
         self.voting = services.VotingService(self.votacoes, self.reunioes, self.auditoria)
 
@@ -134,6 +135,33 @@ class ApplicationController:
                 return self.editar_votacao_post(user, int(match.group(1)), body, meta)
             if method == "GET" and path == "/logs":
                 return self.logs(user)
+            if method == "GET" and path == "/usuarios":
+                return self.listar_usuarios(user, query_params)
+            if method == "GET" and path == "/usuarios/novo":
+                return self.usuario_form(user)
+            if method == "POST" and path == "/usuarios/novo":
+                return self.usuario_post(user, body, meta)
+            match = re.fullmatch(r"/usuarios/(\d+)/editar", path)
+            if method == "GET" and match:
+                return self.usuario_form(user, int(match.group(1)))
+            match = re.fullmatch(r"/usuarios/(\d+)/editar", path)
+            if method == "POST" and match:
+                return self.usuario_post(user, body, meta, int(match.group(1)))
+            match = re.fullmatch(r"/usuarios/(\d+)/excluir", path)
+            if method == "POST" and match:
+                return self.excluir_usuario(user, int(match.group(1)), meta)
+            match = re.fullmatch(r"/usuarios/(\d+)/lotes", path)
+            if method == "GET" and match:
+                return self.gerenciar_lotes(user, int(match.group(1)), query_params)
+            match = re.fullmatch(r"/api/usuarios/(\d+)/lotes", path)
+            if method == "POST" and match:
+                return self.salvar_lote_api(user, int(match.group(1)), body, meta)
+            match = re.fullmatch(r"/api/usuarios/(\d+)/lotes/(\d+)/excluir", path)
+            if method == "POST" and match:
+                return self.excluir_lote_api(user, int(match.group(1)), int(match.group(2)), meta)
+            match = re.fullmatch(r"/usuarios/(\d+)", path)
+            if method == "GET" and match:
+                return self.visualizar_usuario(user, int(match.group(1)))
 
             match = re.fullmatch(r"/reunioes/(\d+)", path)
             if method == "GET" and match:
@@ -356,3 +384,100 @@ class ApplicationController:
     def logs(self, user: dict[str, Any]) -> Response:
         self.require_admin(user)
         return Response.html(templates.logs(user, self.auditoria_repo.list_recent()))
+
+    def listar_usuarios(self, user: dict[str, Any], query: dict[str, Any]) -> Response:
+        self.require_admin(user)
+        nome = str(query.get("nome", ""))
+        tipo = str(query.get("tipo", ""))
+        return Response.html(
+            templates.usuarios(
+                user,
+                self.user_management.list(nome, tipo),
+                nome,
+                tipo,
+                str(query.get("mensagem", "")),
+                str(query.get("erro", "")),
+            )
+        )
+
+    def usuario_form(
+        self,
+        user: dict[str, Any],
+        id_usuario: int | None = None,
+        error: str = "",
+        values: dict[str, Any] | None = None,
+    ) -> Response:
+        self.require_admin(user)
+        usuario = values or (self.user_management.get(id_usuario) if id_usuario is not None else {})
+        return Response.html(templates.form_usuario(user, usuario, error, id_usuario))
+
+    def usuario_post(
+        self,
+        user: dict[str, Any],
+        body: bytes,
+        meta: services.RequestMeta,
+        id_usuario: int | None = None,
+    ) -> Response:
+        self.require_admin(user)
+        form = parse_form(body)
+        try:
+            self.user_management.save(form, user, meta, id_usuario)
+            message = "Usuário atualizado com sucesso." if id_usuario else "Usuário cadastrado com sucesso."
+            return redirect("/usuarios?" + urlencode({"mensagem": message}))
+        except Exception as exc:
+            return self.usuario_form(user, id_usuario, str(exc), form)
+
+    def visualizar_usuario(self, user: dict[str, Any], id_usuario: int) -> Response:
+        self.require_admin(user)
+        usuario = self.user_management.get(id_usuario)
+        condominio = self.usuarios.default_condominio()
+        lotes = []
+        if usuario["tipo_usuario"] == "proprietario" and condominio:
+            lotes = self.usuarios.lots(id_usuario, int(condominio["id_condominio"]))
+        return Response.html(templates.visualizar_usuario(user, usuario, lotes))
+
+    def excluir_usuario(self, user: dict[str, Any], id_usuario: int, meta: services.RequestMeta) -> Response:
+        self.require_admin(user)
+        try:
+            self.user_management.delete(id_usuario, user, meta)
+            return redirect("/usuarios?" + urlencode({"mensagem": "Usuário excluído com sucesso."}))
+        except Exception as exc:
+            return redirect("/usuarios?" + urlencode({"erro": str(exc)}))
+
+    def gerenciar_lotes(self, user: dict[str, Any], id_usuario: int, query: dict[str, Any]) -> Response:
+        self.require_admin(user)
+        usuario, condominio, lotes = self.user_management.lots_context(id_usuario)
+        return Response.html(
+            templates.gerenciar_lotes(
+                user,
+                usuario,
+                condominio,
+                lotes,
+                str(query.get("mensagem", "")),
+                str(query.get("erro", "")),
+            )
+        )
+
+    def salvar_lote_api(self, user: dict[str, Any], id_usuario: int, body: bytes, meta: services.RequestMeta) -> Response:
+        self.require_admin(user)
+        try:
+            self.user_management.save_lot(id_usuario, parse_form(body), user, meta)
+            _, _, lotes = self.user_management.lots_context(id_usuario)
+            return Response.json({"ok": True, "message": "Lote vinculado com sucesso.", "html": templates.lotes_table(id_usuario, lotes)})
+        except Exception as exc:
+            return Response.json({"ok": False, "message": str(exc)}, 400)
+
+    def excluir_lote_api(
+        self,
+        user: dict[str, Any],
+        id_usuario: int,
+        id_lote: int,
+        meta: services.RequestMeta,
+    ) -> Response:
+        self.require_admin(user)
+        try:
+            self.user_management.delete_lot(id_usuario, id_lote, user, meta)
+            _, _, lotes = self.user_management.lots_context(id_usuario)
+            return Response.json({"ok": True, "message": "Vínculo removido com sucesso.", "html": templates.lotes_table(id_usuario, lotes)})
+        except Exception as exc:
+            return Response.json({"ok": False, "message": str(exc)}, 400)

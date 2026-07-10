@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -140,6 +141,124 @@ class AuthService:
     @staticmethod
     def is_admin(user: dict[str, Any] | None) -> bool:
         return bool(user and user.get("tipo_usuario") == "administrador")
+
+
+class UserManagementService:
+    EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+    ALLOWED_TYPES = {"administrador", "proprietario"}
+
+    def __init__(self, usuarios: models.UsuarioRepository, auditoria: AuditoriaService):
+        self.usuarios = usuarios
+        self.auditoria = auditoria
+        self.hasher = security.PasswordHasher()
+
+    def list(self, nome: str = "", tipo: str = "") -> list[dict[str, Any]]:
+        return self.usuarios.list_active(nome, tipo)
+
+    def get(self, id_usuario: int) -> dict[str, Any]:
+        usuario = self.usuarios.by_id(id_usuario)
+        if not usuario:
+            raise ValueError("Usuário não encontrado.")
+        return usuario
+
+    def save(
+        self,
+        form: dict[str, Any],
+        actor: dict[str, Any],
+        meta: RequestMeta,
+        id_usuario: int | None = None,
+    ) -> int:
+        nome = str(form.get("nome_completo", "")).strip()
+        email = str(form.get("email", "")).strip().lower()
+        tipo = str(form.get("tipo_usuario", "")).strip()
+        senha = str(form.get("senha", ""))
+        if len(nome) < 3:
+            raise ValueError("Informe o nome completo do usuário.")
+        if not self.EMAIL_RE.fullmatch(email) or self.usuarios.email_in_use(email, id_usuario):
+            raise ValueError("E-mail inválido ou já cadastrado no sistema.")
+        if tipo not in self.ALLOWED_TYPES:
+            raise ValueError("Selecione um tipo de usuário válido.")
+        if id_usuario is None and len(senha) < 6:
+            raise ValueError("A senha temporária deve possuir ao menos 6 caracteres.")
+        if id_usuario is not None:
+            current = self.get(id_usuario)
+            condominio = self.usuarios.default_condominio()
+            if tipo != "proprietario" and condominio and self.usuarios.lots(id_usuario, int(condominio["id_condominio"])):
+                raise ValueError("Remova os lotes vinculados antes de alterar o perfil do proprietário.")
+            self.usuarios.update(
+                id_usuario,
+                nome,
+                email,
+                tipo,
+                self.hasher.hash(senha) if senha else None,
+            )
+            self.auditoria.registrar(actor, "alterou usuário", f"usuario:{id_usuario}", meta)
+            return id_usuario
+        created_id = self.usuarios.create(nome, email, self.hasher.hash(senha), tipo)
+        self.auditoria.registrar(actor, "cadastrou usuário", f"usuario:{created_id}", meta)
+        return created_id
+
+    def delete(self, id_usuario: int, actor: dict[str, Any], meta: RequestMeta) -> None:
+        self.get(id_usuario)
+        if int(actor["id_usuario"]) == id_usuario:
+            raise ValueError("Você não pode excluir o próprio usuário enquanto está autenticado.")
+        self.usuarios.deactivate(id_usuario)
+        self.auditoria.registrar(actor, "excluiu usuário", f"usuario:{id_usuario}", meta)
+
+    def lots_context(self, id_usuario: int) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+        usuario = self.get(id_usuario)
+        if usuario["tipo_usuario"] != "proprietario":
+            raise PermissionError("Apenas proprietários podem possuir lotes vinculados.")
+        condominio = self.usuarios.default_condominio()
+        if not condominio:
+            raise ValueError("Nenhum condomínio ativo foi encontrado.")
+        lotes = self.usuarios.lots(id_usuario, int(condominio["id_condominio"]))
+        return usuario, condominio, lotes
+
+    def save_lot(
+        self,
+        id_usuario: int,
+        form: dict[str, Any],
+        actor: dict[str, Any],
+        meta: RequestMeta,
+    ) -> int:
+        usuario, condominio, _ = self.lots_context(id_usuario)
+        identificacao = str(form.get("identificacao", "")).strip()
+        id_lote_text = str(form.get("id_lote", "")).strip()
+        id_lote = int(id_lote_text) if id_lote_text.isdigit() else None
+        try:
+            peso = float(str(form.get("peso_original", "")).replace(",", "."))
+        except ValueError as exc:
+            raise ValueError("O campo Fração/Peso deve receber um valor numérico superior a 0.00.") from exc
+        if not identificacao:
+            raise ValueError("Informe a identificação do lote/unidade.")
+        if peso <= 0:
+            raise ValueError("O campo Fração/Peso deve receber um valor numérico superior a 0.00.")
+        if id_lote is not None:
+            current = self.usuarios.lot(id_lote)
+            if not current or int(current["id_usuario"]) != id_usuario:
+                raise ValueError("Lote não encontrado para este proprietário.")
+        if self.usuarios.lot_in_use(int(condominio["id_condominio"]), identificacao, id_lote):
+            raise ValueError("A unidade selecionada já está associada a outro proprietário ativo.")
+        inadimplente = str(form.get("inadimplente", "0")) == "1"
+        saved_id = self.usuarios.save_lot(
+            int(usuario["id_usuario"]),
+            int(condominio["id_condominio"]),
+            identificacao,
+            peso,
+            inadimplente,
+            id_lote,
+        )
+        self.auditoria.registrar(actor, "vinculou lote", f"lote:{saved_id}", meta)
+        return saved_id
+
+    def delete_lot(self, id_usuario: int, id_lote: int, actor: dict[str, Any], meta: RequestMeta) -> None:
+        _, condominio, _ = self.lots_context(id_usuario)
+        lote = self.usuarios.lot(id_lote)
+        if not lote or int(lote["id_usuario"]) != id_usuario:
+            raise ValueError("Lote não encontrado para este proprietário.")
+        self.usuarios.delete_lot(id_lote, id_usuario, int(condominio["id_condominio"]))
+        self.auditoria.registrar(actor, "excluiu lote", f"lote:{id_lote}", meta)
 
 
 class ReuniaoService:
