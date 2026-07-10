@@ -11,12 +11,56 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import psycopg
 from psycopg.rows import dict_row
 
-import psycopg
-from psycopg.rows import dict_row
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = BASE_DIR / "schema.sql"
-DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("STORAGE_POSTGRES_URL") or os.getenv("STORAGE_POSTGRES_PRISMA_URL") or os.getenv("STORAGE_POSTGRES_URL_NON_POOLING")
+# Prioriza as URLs fornecidas pela integracao Supabase/Postgres (fonte de
+# verdade em producao). DATABASE_URL fica por ultimo como override local.
+DATABASE_URL = (
+    os.getenv("STORAGE_POSTGRES_URL")
+    or os.getenv("POSTGRES_URL")
+    or os.getenv("STORAGE_POSTGRES_PRISMA_URL")
+    or os.getenv("POSTGRES_PRISMA_URL")
+    or os.getenv("STORAGE_POSTGRES_URL_NON_POOLING")
+    or os.getenv("POSTGRES_URL_NON_POOLING")
+    or os.getenv("DATABASE_URL")
+)
+
+# Parametros de conexao aceitos pelo libpq. Supabase/Vercel podem anexar
+# extras (ex.: supa, pgbouncer) que fazem o psycopg falhar; eles sao removidos.
+_LIBPQ_PARAMS = {
+    "sslmode",
+    "connect_timeout",
+    "application_name",
+    "options",
+    "channel_binding",
+    "target_session_attrs",
+    "gssencmode",
+    "sslrootcert",
+    "sslcert",
+    "sslkey",
+}
+
+
+def sanitize_conninfo(url: str | None) -> str:
+    """Remove parametros nao suportados pelo libpq da URL de conexao."""
+    if not url:
+        return ""
+    parts = urlsplit(url)
+    kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k in _LIBPQ_PARAMS]
+    if "sslmode" not in dict(kept):
+        kept.append(("sslmode", "require"))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment))
+
+
+def prepare_sql(sql: str) -> str:
+    """Converte placeholders no estilo SQLite (?) para o estilo psycopg (%s)."""
+    return sql.replace("?", "%s")
+
+
+CONNINFO = sanitize_conninfo(DATABASE_URL)
+
+# Regex para descobrir a tabela alvo de um INSERT e devolver a chave primaria.
+_INSERT_TABLE_RE = re.compile(r"insert\s+into\s+([a-zA-Z_][\w]*)", re.IGNORECASE)
 
 INSERT_PRIMARY_KEYS = {
     "condominio": "id_condominio",
@@ -93,19 +137,28 @@ class Votacao:
 
 
 class Database:
-    def __init__(self, path: Path = DB_PATH):
-        self.path = Path(path)
+    def __init__(self, conninfo: str = "") -> None:
+        self.conninfo = conninfo or CONNINFO
+        if not self.conninfo:
+            raise RuntimeError(
+                "Nenhuma URL de banco configurada. Defina DATABASE_URL ou "
+                "STORAGE_POSTGRES_URL (integracao Supabase/Postgres)."
+            )
 
-    def connect(self) -> sqlite3.Connection:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+    def connect(self) -> psycopg.Connection:
+        # prepare_threshold=None desabilita prepared statements do lado do
+        # cliente, evitando conflitos com o pooler (pgbouncer) do Supabase.
+        return psycopg.connect(
+            self.conninfo,
+            row_factory=dict_row,
+            prepare_threshold=None,
+        )
 
     def init_db(self) -> None:
+        schema = SCHEMA_PATH.read_text(encoding="utf-8")
         with self.connect() as conn:
-            conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            # Sem parametros, o psycopg permite multiplos comandos em um execute.
+            conn.execute(schema)
             conn.commit()
 
     def reset_db(self) -> None:
@@ -126,32 +179,57 @@ class Database:
             "condominio",
         ]
         with self.connect() as conn:
-            conn.execute("PRAGMA foreign_keys = OFF")
             for table in drops:
-                conn.execute(f"DROP TABLE IF EXISTS {table}")
+                conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
             conn.commit()
         self.init_db()
 
     def query(self, sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            rows = conn.execute(sql, tuple(params)).fetchall()
-            return [dict(row) for row in rows]
+            with conn.cursor() as cur:
+                cur.execute(prepare_sql(sql), tuple(params))
+                return [dict(row) for row in cur.fetchall()]
 
     def query_one(self, sql: str, params: Iterable[Any] = ()) -> dict[str, Any] | None:
         with self.connect() as conn:
-            row = conn.execute(sql, tuple(params)).fetchone()
-            return dict(row) if row else None
+            with conn.cursor() as cur:
+                cur.execute(prepare_sql(sql), tuple(params))
+                row = cur.fetchone()
+                return dict(row) if row else None
 
     def execute(self, sql: str, params: Iterable[Any] = ()) -> int:
+        prepared = prepare_sql(sql)
         with self.connect() as conn:
-            cursor = conn.execute(sql, tuple(params))
+            with conn.cursor() as cur:
+                returning_key = self._returning_key(prepared)
+                if returning_key:
+                    prepared = f"{prepared.rstrip().rstrip(';')} RETURNING {returning_key}"
+                cur.execute(prepared, tuple(params))
+                new_id = 0
+                if returning_key:
+                    row = cur.fetchone()
+                    if row is not None:
+                        new_id = int(row[returning_key])
             conn.commit()
-            return int(cursor.lastrowid or 0)
+            return new_id
 
     def execute_many(self, sql: str, seq_of_params: Iterable[Iterable[Any]]) -> None:
+        rows = [tuple(params) for params in seq_of_params]
+        if not rows:
+            return
         with self.connect() as conn:
-            conn.executemany(sql, [tuple(params) for params in seq_of_params])
+            with conn.cursor() as cur:
+                cur.executemany(prepare_sql(sql), rows)
             conn.commit()
+
+    @staticmethod
+    def _returning_key(sql: str) -> str | None:
+        if "returning" in sql.lower():
+            return None
+        match = _INSERT_TABLE_RE.search(sql)
+        if not match:
+            return None
+        return INSERT_PRIMARY_KEYS.get(match.group(1).lower())
 
 
 class UsuarioRepository:
@@ -391,34 +469,35 @@ class VotacaoRepository:
 
     def update(self, id_votacao: int, data: dict[str, Any], opcoes: list[str]) -> None:
         with self.db.connect() as conn:
-            conn.execute(
-                prepare_sql("""
-                UPDATE votacao
-                SET id_pauta = ?,
-                    assunto = ?,
-                    pergunta = ?,
-                    tipo_votacao = ?,
-                    tipo_resposta = ?,
-                    tempo_resposta = ?,
-                    max_marcacoes = ?
-                WHERE id_votacao = ?
-                """),
-                [
-                    data["id_pauta"],
-                    data["assunto"],
-                    data["pergunta"],
-                    data["tipo_votacao"],
-                    data["tipo_resposta"],
-                    data["tempo_resposta"],
-                    data["max_marcacoes"],
-                    id_votacao,
-                ],
-            )
-            conn.execute(prepare_sql("DELETE FROM opcao_voto WHERE id_votacao = ?"), [id_votacao])
-            conn.executemany(
-                prepare_sql("INSERT INTO opcao_voto (id_votacao, descricao, ordem) VALUES (?, ?, ?)"),
-                [(id_votacao, descricao, ordem) for ordem, descricao in enumerate(opcoes, start=1)],
-            )
+            with conn.cursor() as cur:
+                cur.execute(
+                    prepare_sql("""
+                    UPDATE votacao
+                    SET id_pauta = ?,
+                        assunto = ?,
+                        pergunta = ?,
+                        tipo_votacao = ?,
+                        tipo_resposta = ?,
+                        tempo_resposta = ?,
+                        max_marcacoes = ?
+                    WHERE id_votacao = ?
+                    """),
+                    [
+                        data["id_pauta"],
+                        data["assunto"],
+                        data["pergunta"],
+                        data["tipo_votacao"],
+                        data["tipo_resposta"],
+                        data["tempo_resposta"],
+                        data["max_marcacoes"],
+                        id_votacao,
+                    ],
+                )
+                cur.execute(prepare_sql("DELETE FROM opcao_voto WHERE id_votacao = ?"), [id_votacao])
+                cur.executemany(
+                    prepare_sql("INSERT INTO opcao_voto (id_votacao, descricao, ordem) VALUES (?, ?, ?)"),
+                    [(id_votacao, descricao, ordem) for ordem, descricao in enumerate(opcoes, start=1)],
+                )
             conn.commit()
 
     def start(self, id_votacao: int, iniciou_em: str, encerra_em: str) -> None:
