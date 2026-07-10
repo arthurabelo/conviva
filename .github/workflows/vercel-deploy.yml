@@ -1,4 +1,4 @@
-name: Vercel Deploy
+name: Validação Python
 
 on:
   push:
@@ -25,18 +25,3 @@ jobs:
       - name: Run tests
         run: |
           python -m unittest discover -s tests -p 'test*.py'
-
-  deploy:
-    needs: validate
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Deploy to Vercel
-        uses: amondnet/vercel-action@v25
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          vercel-args: '--prod'
