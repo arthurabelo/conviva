@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+from email.message import Message
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
@@ -64,7 +65,10 @@ def app(environ, start_response):
     path = environ.get("PATH_INFO") or "/"
     query = environ.get("QUERY_STRING") or ""
 
-    headers = {}
+    # Usa email.message.Message para que o acesso aos cabecalhos seja
+    # case-insensitive, igual ao BaseHTTPRequestHandler. Um dict comum quebraria
+    # headers.get("Cookie") porque o WSGI entrega as chaves em MAIUSCULAS.
+    headers = Message()
     for key, value in environ.items():
         if not key.startswith("HTTP_"):
             continue
