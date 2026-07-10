@@ -248,6 +248,119 @@ class UsuarioRepository:
             [id_usuario],
         )
 
+    def list_all(self, search: str = "", tipo: str = "") -> list[dict[str, Any]]:
+        query = "SELECT * FROM usuario WHERE ativo = 1"
+        params: list[Any] = []
+        term = search.strip().lower()
+        if term:
+            query += " AND (lower(nome_completo) LIKE ? OR lower(email) LIKE ?)"
+            like = f"%{term}%"
+            params.extend([like, like])
+        if tipo in {"administrador", "proprietario", "procurador"}:
+            query += " AND tipo_usuario = ?"
+            params.append(tipo)
+        query += " ORDER BY id_usuario"
+        return self.db.query(query, params)
+
+    def email_exists(self, email: str, exclude_id: int | None = None) -> bool:
+        query = "SELECT 1 FROM usuario WHERE email = ? AND ativo = 1"
+        params: list[Any] = [email.strip().lower()]
+        if exclude_id is not None:
+            query += " AND id_usuario <> ?"
+            params.append(exclude_id)
+        return bool(self.db.query_one(query, params))
+
+    def create(self, nome: str, email: str, senha_hash: str, tipo: str) -> int:
+        return self.db.execute(
+            """
+            INSERT INTO usuario (nome_completo, email, senha_hash, tipo_usuario, ativo)
+            VALUES (?, ?, ?, ?, 1)
+            """,
+            [nome, email.strip().lower(), senha_hash, tipo],
+        )
+
+    def update(self, id_usuario: int, nome: str, email: str, tipo: str, senha_hash: str | None = None) -> None:
+        if senha_hash:
+            self.db.execute(
+                """
+                UPDATE usuario
+                SET nome_completo = ?, email = ?, tipo_usuario = ?, senha_hash = ?
+                WHERE id_usuario = ?
+                """,
+                [nome, email.strip().lower(), tipo, senha_hash, id_usuario],
+            )
+        else:
+            self.db.execute(
+                """
+                UPDATE usuario
+                SET nome_completo = ?, email = ?, tipo_usuario = ?
+                WHERE id_usuario = ?
+                """,
+                [nome, email.strip().lower(), tipo, id_usuario],
+            )
+
+    def deactivate(self, id_usuario: int) -> None:
+        self.db.execute("UPDATE usuario SET ativo = 0 WHERE id_usuario = ?", [id_usuario])
+
+
+class CondominioRepository:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def default(self) -> dict[str, Any] | None:
+        return self.db.query_one(
+            "SELECT * FROM condominio WHERE status = 'ativo' ORDER BY id_condominio LIMIT 1"
+        )
+
+
+class LoteRepository:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def list_for_user(self, id_usuario: int) -> list[dict[str, Any]]:
+        return self.db.query(
+            "SELECT * FROM lote WHERE id_usuario = ? ORDER BY id_lote",
+            [id_usuario],
+        )
+
+    def get(self, id_lote: int) -> dict[str, Any] | None:
+        return self.db.query_one("SELECT * FROM lote WHERE id_lote = ?", [id_lote])
+
+    def owner_of(self, id_condominio: int, identificacao: str, exclude_id: int | None = None) -> dict[str, Any] | None:
+        query = """
+            SELECT l.*, u.nome_completo
+            FROM lote l
+            JOIN usuario u ON u.id_usuario = l.id_usuario
+            WHERE l.id_condominio = ? AND lower(l.identificacao) = ?
+        """
+        params: list[Any] = [id_condominio, identificacao.strip().lower()]
+        if exclude_id is not None:
+            query += " AND l.id_lote <> ?"
+            params.append(exclude_id)
+        return self.db.query_one(query, params)
+
+    def create(self, id_condominio: int, id_usuario: int, identificacao: str, peso: float, inadimplente: int) -> int:
+        return self.db.execute(
+            """
+            INSERT INTO lote (id_condominio, id_usuario, identificacao, peso_original, inadimplente)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [id_condominio, id_usuario, identificacao.strip(), peso, inadimplente],
+        )
+
+    def update(self, id_lote: int, identificacao: str, peso: float, inadimplente: int) -> None:
+        self.db.execute(
+            """
+            UPDATE lote
+            SET identificacao = ?, peso_original = ?, inadimplente = ?
+            WHERE id_lote = ?
+            """,
+            [identificacao.strip(), peso, inadimplente, id_lote],
+        )
+
+    def delete(self, id_lote: int) -> None:
+        self.db.execute("DELETE FROM lote WHERE id_lote = ?", [id_lote])
+
 
 class ReuniaoRepository:
     def __init__(self, db: Database):

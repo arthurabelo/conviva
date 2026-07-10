@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -140,6 +141,183 @@ class AuthService:
     @staticmethod
     def is_admin(user: dict[str, Any] | None) -> bool:
         return bool(user and user.get("tipo_usuario") == "administrador")
+
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+TIPOS_VALIDOS = {"administrador", "proprietario", "procurador"}
+
+
+class UsuarioService:
+    def __init__(
+        self,
+        usuarios: models.UsuarioRepository,
+        auditoria: AuditoriaService,
+    ):
+        self.usuarios = usuarios
+        self.auditoria = auditoria
+        self.hasher = security.PasswordHasher()
+
+    def list_usuarios(self, search: str = "", tipo: str = "") -> list[dict[str, Any]]:
+        return self.usuarios.list_all(search, tipo)
+
+    def get_usuario(self, id_usuario: int) -> dict[str, Any] | None:
+        return self.usuarios.by_id(id_usuario)
+
+    def _validate_common(self, nome: str, email: str, tipo: str, exclude_id: int | None) -> None:
+        if not nome.strip():
+            raise ValueError("Informe o nome completo do usuario.")
+        # EX01 / RN01 - formato e unicidade do e-mail.
+        if not EMAIL_RE.match(email.strip()):
+            raise ValueError("E-mail invalido ou ja cadastrado no sistema.")
+        if self.usuarios.email_exists(email, exclude_id):
+            raise ValueError("E-mail invalido ou ja cadastrado no sistema.")
+        if tipo not in TIPOS_VALIDOS:
+            raise ValueError("Selecione um tipo de usuario valido.")
+
+    def create_usuario(self, form: dict[str, Any], actor: dict[str, Any], meta: RequestMeta) -> int:
+        nome = str(form.get("nome_completo", "")).strip()
+        email = str(form.get("email", "")).strip()
+        tipo = str(form.get("tipo_usuario", "")).strip()
+        senha = str(form.get("senha", ""))
+        self._validate_common(nome, email, tipo, exclude_id=None)
+        if len(senha) < 6:
+            raise ValueError("A senha deve possuir ao menos 6 caracteres.")
+        id_usuario = self.usuarios.create(nome, email, self.hasher.hash(senha), tipo)
+        self.auditoria.registrar(actor, "cadastrou usuario", f"usuario:{id_usuario}", meta)
+        return id_usuario
+
+    def update_usuario(self, id_usuario: int, form: dict[str, Any], actor: dict[str, Any], meta: RequestMeta) -> None:
+        existente = self.usuarios.by_id(id_usuario)
+        if not existente:
+            raise ValueError("Usuario nao encontrado.")
+        nome = str(form.get("nome_completo", "")).strip()
+        email = str(form.get("email", "")).strip()
+        tipo = str(form.get("tipo_usuario", "")).strip()
+        senha = str(form.get("senha", ""))
+        self._validate_common(nome, email, tipo, exclude_id=id_usuario)
+        senha_hash = None
+        if senha:
+            if len(senha) < 6:
+                raise ValueError("A senha deve possuir ao menos 6 caracteres.")
+            senha_hash = self.hasher.hash(senha)
+        self.usuarios.update(id_usuario, nome, email, tipo, senha_hash)
+        self.auditoria.registrar(actor, "alterou usuario", f"usuario:{id_usuario}", meta)
+
+    def delete_usuario(self, id_usuario: int, actor: dict[str, Any], meta: RequestMeta) -> None:
+        if int(actor["id_usuario"]) == id_usuario:
+            raise ValueError("Nao e possivel excluir o proprio usuario em uso.")
+        if not self.usuarios.by_id(id_usuario):
+            raise ValueError("Usuario nao encontrado.")
+        self.usuarios.deactivate(id_usuario)
+        self.auditoria.registrar(actor, "excluiu usuario", f"usuario:{id_usuario}", meta)
+
+
+class LoteService:
+    def __init__(
+        self,
+        lotes: models.LoteRepository,
+        usuarios: models.UsuarioRepository,
+        condominios: models.CondominioRepository,
+        auditoria: AuditoriaService,
+    ):
+        self.lotes = lotes
+        self.usuarios = usuarios
+        self.condominios = condominios
+        self.auditoria = auditoria
+
+    def _ensure_proprietario(self, id_usuario: int) -> dict[str, Any]:
+        usuario = self.usuarios.by_id(id_usuario)
+        if not usuario:
+            raise ValueError("Usuario nao encontrado.")
+        # RN02 - somente proprietarios possuem lotes.
+        if usuario["tipo_usuario"] != "proprietario":
+            raise PermissionError("Apenas usuarios do tipo Proprietario podem ter lotes vinculados.")
+        return usuario
+
+    def _condominio(self) -> dict[str, Any]:
+        condominio = self.condominios.default()
+        if not condominio:
+            raise ValueError("Nenhum condominio ativo cadastrado para vincular lotes.")
+        return condominio
+
+    def overview(self, id_usuario: int) -> dict[str, Any]:
+        usuario = self._ensure_proprietario(id_usuario)
+        registros = self.lotes.list_for_user(id_usuario)
+        lotes: list[dict[str, Any]] = []
+        total_acumulado = 0.0
+        total_efetivo = 0.0
+        for lote in registros:
+            peso = float(lote["peso_original"])
+            inadimplente = int(lote["inadimplente"]) == 1
+            # RN04 - inadimplente zera o peso efetivo no voto.
+            peso_efetivo = 0.0 if inadimplente else peso
+            total_acumulado += peso
+            total_efetivo += peso_efetivo
+            lotes.append(
+                {
+                    "id_lote": int(lote["id_lote"]),
+                    "identificacao": lote["identificacao"],
+                    "peso_original": peso,
+                    "inadimplente": inadimplente,
+                    "peso_efetivo": peso_efetivo,
+                }
+            )
+        return {
+            "usuario": usuario,
+            "lotes": lotes,
+            "total_acumulado": total_acumulado,  # RN05
+            "total_efetivo": total_efetivo,  # RN05
+        }
+
+    @staticmethod
+    def _parse_peso(valor: Any) -> float:
+        try:
+            peso = float(str(valor).replace(",", "."))
+        except (TypeError, ValueError):
+            raise ValueError("O campo Fracao/Peso deve receber um valor numerico superior a 0.00.")
+        # EX02 - peso deve ser estritamente maior que zero.
+        if peso <= 0:
+            raise ValueError("O campo Fracao/Peso deve receber um valor numerico superior a 0.00.")
+        return peso
+
+    def add_lote(self, id_usuario: int, form: dict[str, Any], actor: dict[str, Any], meta: RequestMeta) -> None:
+        self._ensure_proprietario(id_usuario)
+        condominio = self._condominio()
+        identificacao = str(form.get("identificacao", "")).strip()
+        if not identificacao:
+            raise ValueError("Informe a identificacao do lote/unidade.")
+        peso = self._parse_peso(form.get("peso"))
+        inadimplente = 1 if str(form.get("inadimplente", "0")) in {"1", "sim", "Sim", "true"} else 0
+        # EX03 / RN03 - lote unico por proprietario ativo no condominio.
+        conflito = self.lotes.owner_of(int(condominio["id_condominio"]), identificacao)
+        if conflito:
+            raise ValueError("A unidade selecionada ja esta associada a outro proprietario ativo.")
+        id_lote = self.lotes.create(int(condominio["id_condominio"]), id_usuario, identificacao, peso, inadimplente)
+        self.auditoria.registrar(actor, "vinculou lote", f"lote:{id_lote}", meta)
+
+    def update_lote(self, id_usuario: int, id_lote: int, form: dict[str, Any], actor: dict[str, Any], meta: RequestMeta) -> None:
+        self._ensure_proprietario(id_usuario)
+        condominio = self._condominio()
+        lote = self.lotes.get(id_lote)
+        if not lote or int(lote["id_usuario"]) != id_usuario:
+            raise ValueError("Lote nao encontrado para este proprietario.")
+        identificacao = str(form.get("identificacao", "")).strip()
+        if not identificacao:
+            raise ValueError("Informe a identificacao do lote/unidade.")
+        peso = self._parse_peso(form.get("peso"))
+        inadimplente = 1 if str(form.get("inadimplente", "0")) in {"1", "sim", "Sim", "true"} else 0
+        conflito = self.lotes.owner_of(int(condominio["id_condominio"]), identificacao, exclude_id=id_lote)
+        if conflito:
+            raise ValueError("A unidade selecionada ja esta associada a outro proprietario ativo.")
+        self.lotes.update(id_lote, identificacao, peso, inadimplente)
+        self.auditoria.registrar(actor, "alterou lote", f"lote:{id_lote}", meta)
+
+    def delete_lote(self, id_usuario: int, id_lote: int, actor: dict[str, Any], meta: RequestMeta) -> None:
+        lote = self.lotes.get(id_lote)
+        if not lote or int(lote["id_usuario"]) != id_usuario:
+            raise ValueError("Lote nao encontrado para este proprietario.")
+        self.lotes.delete(id_lote)
+        self.auditoria.registrar(actor, "removeu lote", f"lote:{id_lote}", meta)
 
 
 class ReuniaoService:
